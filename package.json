@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test:db": "tsx supabase/tests/rls.test.mjs",
     "test:backend": "tsx supabase/tests/backend.test.mts",
-    "db:seed": "tsx supabase/seed/seed.ts"
+    "db:seed": "tsx supabase/seed/seed.ts",
+    "test:live": "tsx supabase/tests/live.test.mts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",

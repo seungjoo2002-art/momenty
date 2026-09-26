@@ -101,7 +101,11 @@ npx supabase link --project-ref <project-ref>
 npx supabase db push          # supabase/migrations 를 순서대로 적용
 ```
 
-**B. SQL Editor**: Dashboard → SQL Editor에서 `supabase/migrations/20260927000000_init_moments.sql` 내용을 그대로 실행.
+**B. SQL Editor**: Dashboard → SQL Editor에서 아래 파일을 **순서대로** 각각 전체 실행한다.
+
+1. `supabase/migrations/20260927000000_init_moments.sql` — 스키마 · RLS · view · Storage 정책
+2. `supabase/migrations/20260927010000_grant_api_access.sql` — Data API 권한(GRANT). 새 프로젝트는 테이블을 anon/authenticated에 자동으로 열지 않으므로 필요하다.
+3. `supabase/migrations/20260927020000_grant_service_role.sql` — service_role 테이블 권한 (seed · 서버 전용 작업용).
 
 ### 3. 개발용 seed (선택)
 
