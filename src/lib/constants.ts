@@ -13,9 +13,9 @@ export const CATEGORY_LABEL: Record<CategoryKey, string> = {
 
 /**
  * 아직 열지 않은 기능 (v0.5 이후). false면 진입 링크를 숨기고, 주소로 들어오면 "준비 중" 화면을 보여준다.
- * Creator AI(Persona 대화) · Fan Memory · AI Fan Manager · 결제
+ * Creator AI(Persona 대화)는 v0.5-2에서 열었다. Fan Memory · AI Fan Manager · 결제는 아직
  */
 export const FEATURES = {
-  creatorAI: false,
+  creatorAI: true,
   payments: false,
 } as const;

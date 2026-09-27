@@ -128,12 +128,12 @@ function TodayPanel({ creator, tier, moments, isOwner }: { creator: Creator; tie
       )}
 
       {/* Creator AI는 하루 다음에, 조용하게 (v0.5에서 연다) */}
-      {FEATURES.creatorAI && moments.length > 0 && canChat(tier) && (
+      {FEATURES.creatorAI && !isOwner && creator.personaEnabled && canChat(tier) && (
         <Link
           href={`/chat/${creator.id}`}
           className="mt-8 flex items-center justify-between border-t border-line py-4 text-caption text-muted hover:text-ink"
         >
-          <span>오늘의 {givenName}에 대해 AI와 이야기하기</span>
+          <span>🤖 {creator.name} AI와 이야기하기</span>
           <ChevronRight className="size-4" />
         </Link>
       )}

@@ -24,7 +24,8 @@ const KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
 const admin = createClient(URL_, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false, autoRefreshToken: false } });
 const PORT = 3100;
 const BASE = `http://localhost:${PORT}`;
-const PER_CREATOR_LIMIT = 12;
+/** DB 기본 정책 (private.ai_settings) — 테스트는 이 값을 바꾸지 않는다 */
+const PER_CREATOR_LIMIT = 20;
 
 {
   const settings = await fetch(`${URL_}/auth/v1/settings`, { headers: { apikey: KEY } }).then((r) => r.json());
@@ -66,7 +67,8 @@ async function startServer() {
   server = spawn("npx", ["next", "start", "-p", String(PORT)], {
     shell: true,
     stdio: "ignore",
-    env: { ...process.env, AI_RATE_LIMIT_PER_CREATOR: String(PER_CREATOR_LIMIT), AI_RATE_LIMIT_PER_USER: "100", AI_RATE_LIMIT_WINDOW_SEC: "600" },
+    // 권한 · 입력 · Context 검사는 LLM 없이 한다 (실제 API 비용 없이 · 결과가 모델에 좌우되지 않게). 실제 LLM은 test:llm
+    env: { ...process.env, AI_PROVIDER: "none" },
   });
   for (let i = 0; i < 60; i++) {
     if (await fetch(`${BASE}/login`).then((r) => r.ok, () => false)) return;
@@ -212,6 +214,11 @@ try {
     premOn: await moment(X.sb, X.creatorId, "[ai-test] PREMIUM 비밀 · AI 허용", "premium", true),
     yPrem: await moment(Y.sb, Y.creatorId, "[ai-test] Y PREMIUM 비밀", "premium", true),
   };
+  // X는 Persona를 설정 (본인 세션) — Y는 설정하지 않는다
+  {
+    const { error } = await X.sb.from("creator_personas").insert({ creator_id: X.creatorId, formality: "casual", reply_length: "short", traits: ["warm"] });
+    if (error) throw error;
+  }
   // 결제 서버 역할: S를 X의 subscriber로 (admin은 이 준비와 정리에만)
   {
     const { error } = await admin.from("subscriptions").insert({ fan_id: S.uid, creator_id: X.creatorId, tier: "subscriber" });
@@ -327,11 +334,12 @@ try {
   /* ---------- B · Context ---------- */
   let benignMeta: NonNullable<ChatJson["meta"]> = {};
   section("B · Today Context (RLS + ai_context_enabled)");
-  await step("구독자 S: 200 · AI 응답 메타 (author=ai · persona · generated=false)", async () => {
+  await step("구독자 S: 200 · AI 응답 메타 (author=ai · persona) · Provider 미설정이면 LLM 없이 reply null", async () => {
     const r = await chat({ creatorId: X.creatorId, message: "오늘 어땠어요?" }, S.cookie);
     benignMeta = r.json.meta ?? {};
+    const noProvider = r.json.status === "provider_not_configured";
     return [
-      r.status === 200 && r.json.reply === null && benignMeta.author === "ai" && benignMeta.persona?.creatorId === X.creatorId && benignMeta.generated === false,
+      r.status === 200 && benignMeta.author === "ai" && benignMeta.persona?.creatorId === X.creatorId && (noProvider ? r.json.reply === null && benignMeta.generated === false : benignMeta.generated === true),
       { status: r.status, st: r.json.status, meta: benignMeta },
     ];
   });
@@ -365,7 +373,7 @@ try {
     const r = await chat({ creatorId: X.creatorId, message: "hi", momentId: M.yPrem }, S.cookie);
     return [r.status === 200 && r.json.meta?.context?.focusMomentId === null && !r.text.includes("Y PREMIUM"), r.json.meta?.context];
   });
-  await step("Y로 직접 요청 (S는 Y 구독자 아님) → 403 · 데이터 없음", async () => {
+  await step("Y로 직접 요청 (S는 Y 구독자 아님 · Persona 미설정) → 403 · 데이터 없음", async () => {
     const r = await chat({ creatorId: Y.creatorId, message: "hi", momentId: M.yPrem }, S.cookie);
     return [r.status === 403 && !r.json.meta && !r.text.includes("PREMIUM"), { status: r.status, code: r.json.error?.code }];
   });

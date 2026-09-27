@@ -38,7 +38,8 @@ export interface ContextMoment {
   visibility: Visibility;
 }
 
-export type ContextType = "style" | "facts" | "boundaries" | "today" | "fanMemory" | "conversation" | "focus";
+import type { ContextType } from "./audit";
+export type { ContextType };
 
 /** available = false: 아직 저장소가 없거나 비어 있음 */
 export interface ContextSection<T> {
@@ -136,7 +137,49 @@ export function createContextBuilder(sb: SupabaseClient, creator: PersonaContext
 /** 이 Context가 실제로 담고 있는 칸 (감사 기록용) */
 export function contextTypesOf(ctx: PersonaContext): ContextType[] {
   const types: ContextType[] = [];
-  for (const k of ["style", "facts", "boundaries", "today", "fanMemory", "conversation"] as const) if (ctx[k].available) types.push(k);
+  if (ctx.today.available) types.push("today");
   if (ctx.focus) types.push("focus");
   return types;
+}
+
+/* ---------- Persona (DB 함수 — 서버 키 + 팬 JWT) ---------- */
+
+export type PersonaDenial = "creator_not_found" | "own_channel" | "persona_disabled" | "persona_not_configured" | "subscription_required";
+
+export class PersonaAccessError extends Error {
+  constructor(readonly code: PersonaDenial) {
+    super(code);
+    this.name = "PersonaAccessError";
+  }
+}
+
+/**
+ * ai_persona_context(): 권한 판단(존재 · 본인 채널 · Persona ON · 설정됨 · 구독 등급)을 DB가 하고,
+ * 통과하면 Prompt에 필요한 값만 돌려준다. 팬은 원본 테이블을 읽을 수 없다.
+ */
+export async function loadPersona(sb: SupabaseClient, serverKey: string, creatorId: string): Promise<import("./prompt").PersonaRecord> {
+  const { data, error } = await sb.rpc("ai_persona_context", { p_server_key: serverKey, p_creator_id: creatorId });
+  if (error) {
+    const code = (["creator_not_found", "own_channel", "persona_disabled", "persona_not_configured", "subscription_required"] as const).find((c) =>
+      error.message.includes(c),
+    );
+    if (code) throw new PersonaAccessError(code);
+    throw error;
+  }
+  return data;
+}
+
+/** 이 팬의 이 크리에이터 대화 중 최근 n개 (RLS: 본인 대화만) — 오래된 것부터 */
+export async function loadRecentConversation(sb: SupabaseClient, userId: string, creatorId: string, n: number) {
+  const { data: conv, error } = await sb.from("ai_conversations").select("id").eq("fan_id", userId).eq("creator_id", creatorId).maybeSingle();
+  if (error) throw error;
+  if (!conv) return [];
+  const { data, error: mErr } = await sb
+    .from("ai_messages")
+    .select("sender, content, created_at")
+    .eq("conversation_id", conv.id)
+    .order("created_at", { ascending: false })
+    .limit(n);
+  if (mErr) throw mErr;
+  return ((data ?? []) as { sender: "fan" | "ai"; content: string }[]).reverse().map((m) => ({ sender: m.sender, content: m.content }));
 }

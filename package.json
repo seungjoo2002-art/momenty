@@ -15,9 +15,12 @@
     "db:cleanup-media": "tsx supabase/seed/cleanup-media.ts",
     "test:e2e": "tsx supabase/tests/e2e.test.mts",
     "test:ui": "tsx supabase/tests/ui.e2e.mts",
-    "test:ai": "tsx supabase/tests/ai.test.mts"
+    "test:ai": "tsx supabase/tests/ai.test.mts",
+    "test:persona-live": "tsx supabase/tests/persona.live.test.mts",
+    "test:llm": "tsx supabase/tests/persona.llm.test.mts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.2",
     "clsx": "^2.1.1",

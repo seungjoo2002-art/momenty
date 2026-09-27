@@ -30,3 +30,21 @@ export function describeAiProvider(): { provider: AiProviderName | null; model: 
   const c = getAiProviderConfig();
   return { provider: c?.provider ?? null, model: c?.model ?? null };
 }
+
+/**
+ * DB의 AI 함수(Persona Context · 대화 저장 · rate limit)를 부를 때 쓰는 서버 키.
+ * DB에는 SHA-256 해시만 있다 (private.server_keys). 없으면 AI Route는 동작하지 않는다.
+ */
+export function getAiServerKey(): string {
+  const key = process.env.AI_SERVER_KEY?.trim();
+  if (!key || key.length < 32) throw new AiConfigError("AI_SERVER_KEY");
+  return key;
+}
+
+/** 서버 설정이 빠졌을 때 — 응답에는 어떤 값이 빠졌는지 내보내지 않는다 (로그에만) */
+export class AiConfigError extends Error {
+  constructor(readonly missing: string) {
+    super(`AI server config missing: ${missing}`);
+    this.name = "AiConfigError";
+  }
+}

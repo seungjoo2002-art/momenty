@@ -8,7 +8,8 @@
  * 남기는 것: 요청 id, 크리에이터 id, 결과 코드, 메시지 길이, Context 종류와 개수.
  */
 import "server-only";
-import type { ContextType } from "./context";
+/** DB(ai_messages.context_types)와 같은 목록 */
+export type ContextType = "style" | "personality" | "facts" | "boundaries" | "today" | "focus" | "conversation" | "fan_memory";
 
 export interface AiResponseMeta {
   /** 이 응답은 AI(Creator Persona)의 것 — 크리에이터 본인의 말이 아니다 */

@@ -127,6 +127,7 @@ npx supabase db push          # supabase/migrations 를 순서대로 적용
 2. `supabase/migrations/20260927010000_grant_api_access.sql` — Data API 권한(GRANT). 새 프로젝트는 테이블을 anon/authenticated에 자동으로 열지 않으므로 필요하다.
 3. `supabase/migrations/20260927020000_grant_service_role.sql` — service_role 테이블 권한 (seed · 서버 전용 작업용).
 4. `supabase/migrations/20260927030000_v04_auth_profiles_media.sql` — v0.4: 컬럼 단위 쓰기 권한, 미디어 경로 검증 trigger, 무료 팔로우, 팔로워 수 집계, avatars bucket · 파일 형식/크기 제한, 보관함, orphan 파일 조회 함수.
+5. `supabase/migrations/20260928000000_v05_persona_chat.sql` — v0.5-2: Persona · 사실 · 경계 · AI 대화 · 서버 키 함수 · 공유 rate limit. 적용 후 `insert into private.server_keys (id, key_hash) values ('ai', encode(sha256('<AI_SERVER_KEY>'), 'hex'))` 로 서버 키 해시를 등록한다.
 
 ### 3. 개발용 seed (선택)
 
@@ -187,7 +188,9 @@ npm run test:backend   # 서비스가 만드는 요청(KST 범위 · 로그인 �
 npm run test:live -- --confirm-dev   # 실제 Supabase · seed 데모 계정으로 RLS · Storage 권한 회귀 검사
 npm run test:e2e  -- --confirm-dev   # 실제 Supabase에 새 Creator · Fan 가입 → 흐름 · 보안 검사 → 정리
 npm run build && npm run test:ui -- --confirm-dev   # 설치된 Chrome으로 화면 E2E (가입 · 기록 · 팔로우 · 라우트 보호)
-npm run build && npm run test:ai -- --confirm-dev   # 서버 라우트 보호 · /api/ai/chat 인증 · 입력 · 권한 · Context · injection · rate limit
+npm run build && npm run test:ai -- --confirm-dev   # 서버 라우트 보호 · /api/ai/chat 인증 · 입력 · 권한 · Context · injection · rate limit (LLM 없이)
+npm run test:persona-live -- --confirm-dev          # 실제 프로젝트: Persona · Facts · Boundaries RLS · 서버 키 함수 · 공유 rate limit(동시성)
+npm run build && npm run test:llm -- --confirm-dev  # 실제 Anthropic 호출(비용 발생, 약 13회): Truth · Grounding · Boundary · injection · 품질
 npm run db:cleanup-media -- --dry-run --confirm-dev # 참조 없는 업로드 파일 찾기 (--dry-run 빼면 삭제)
 ```
 
@@ -206,21 +209,29 @@ service role은 준비 · 정리에만 쓰고, 권한 검사는 전부 테스트
 - service role key는 앱 코드(페이지 · Route Handler) 어디에도 없다. seed · 정리 스크립트 · 테스트 준비에만.
 - 서버 보호 경로: `/today` `/my` `/archive` `/chat` `/subscribe` `/studio` `/setup`. 클라이언트 Gate는 화면 전환용으로 남아 있다.
 
-### POST /api/ai/chat (LLM 미연결)
+### Creator Persona AI (v0.5-2)
 
-| 단계 | 내용 | 실패 |
-|---|---|---|
-| 인증 | 쿠키 세션 → `getUser()` · 다른 Origin 요청 거부 | 401 · 403 |
-| 입력 | zod strict: `creatorId` · `message`(1~1000자) · `conversationId?` · `momentId?`, 정의 밖 필드 거부, 본문 16KB | 400 |
-| 권한 | 크리에이터 존재 · Persona 사용 · 본인 채널 아님 · 구독자(subscriber/premium) | 404 · 403 |
-| 횟수 제한 | `RateLimiter` 인터페이스 (user × creator, user 전체, 시간 창). 지금은 프로세스 메모리 구현 | 429 + Retry-After |
-| Context | `createContextBuilder(사용자 세션)` — `moments` + RLS + `ai_context_enabled = true` 만 | — |
-| 응답 | `reply: null`, `meta { author: "ai", persona, generated, provider, model, context { types, momentIds, focusMomentId } }` | — |
+```
+Chat UI ─ { creatorId, message, momentId? } ─▶ /api/ai/chat
+  1 인증(쿠키 세션 getUser) → 2 입력(zod strict) → 3 권한 = ai_persona_context(서버 키, creatorId)   ← DB가 판단
+  → 4 rate limit = consume_ai_rate_limit(서버 키, creatorId)  (Postgres · 기본 20/60/600초 · private.ai_settings)
+  → 5 Context: 팬 세션 + RLS로 볼 수 있고 ai_context_enabled인 오늘 Moment · focus Moment · 최근 12개 메시지
+  → 6 경계(전) → 7 Prompt 9계층 → 8 Anthropic(@anthropic-ai/sdk, AI_MODEL) → 9 경계(후) → 10 record_ai_exchange(서버 키)
+```
 
-- Persona가 볼 수 있는 칸: style · facts · boundaries · **today** · fanMemory · conversation (+ focus). v0.5-1에서는 today만 데이터가 있다.
-- 메시지 내용은 권한 · Context 선택에 쓰이지 않는다 → prompt injection으로 데이터 범위가 넓어지지 않는다.
-- 감사 기록은 요청 id · 크리에이터 id · 결과 · 메시지 길이 · Context 종류/개수만 (본문 · 프롬프트 · 개인정보 없음).
-- AI 키는 `AI_PROVIDER` · `AI_API_KEY` · `AI_MODEL` (서버 환경 변수). `src/lib/ai/*`는 `server-only` — Client Component에서 import하면 빌드가 실패한다.
+| 항목 | 내용 |
+|---|---|
+| 데이터 | `creator_personas`(말투 · 성향) · `creator_facts`(확인된 사실) · `creator_boundaries`(주제 10개) · `ai_conversations` · `ai_messages` — migration `20260928000000_v05_persona_chat.sql` |
+| 서버 키 | `AI_SERVER_KEY`(서버 환경 변수) — DB에는 SHA-256 해시만(`private.server_keys`). 팬 JWT + 서버 키가 모두 있어야 Persona · 저장 · rate limit 함수가 동작 → 팬이 브라우저에서 AI 메시지를 위조하거나 설정 원문을 가져갈 수 없다 |
+| Prompt | SYSTEM → STYLE → PERSONALITY → VERIFIED FACTS → BOUNDARIES → TODAY CONTEXT → FAN CONTEXT(비어 있음) → CONVERSATION → USER (`src/lib/ai/prompt.ts`) |
+| Truth Rule | 사실로 말할 수 있는 것: 확인된 사실 · 팬이 볼 수 있는 오늘 Moment · 대화에서 팬이 말한 것. 없으면 "기록에 없어서 지어내게 된다"고 말한다. 기록에 없는 감정 · 평가도 덧붙이지 않는다 |
+| 근거 | 모델은 Moment를 별칭(m1…)으로만 보고, 답과 함께 쓴 별칭을 돌려준다 → 서버가 id로 바꾸고 DB가 다시 검증해 저장 |
+| 경계 | 막힌 주제는 LLM 호출 전 서버가 감지해 거절 모드(오늘 기록 · 사실 제외), 답에서 위치 · 만남 약속 · 유출 · 사칭이 보이면 고정 거절 문장으로 교체. 노골적 성적 내용은 설정과 무관하게 차단 |
+| 거절 · 재시도 | 모델의 안전 거절은 그대로 존중(다른 모델로 재시도하지 않음). 기술적 오류만 SDK 재시도 2회 · 30초 timeout. 저장은 성공한 답 하나로 한 번 — 실패하면 팬 메시지도 저장하지 않는다 |
+| 표시 | 대화방 상단 "AI가 생성한 답변입니다", AI 메시지 "🤖 {이름} AI". 실제 크리에이터 표시(✓ {이름})는 Human takeover 단계에서만 |
+| 설정 | Studio → 설정 → Creator AI · Persona. 말투를 한 번 저장해야 팬이 대화를 시작할 수 있다 |
+
+AI 키는 `AI_PROVIDER=anthropic` · `AI_API_KEY` · `AI_MODEL` (서버 환경 변수). `src/lib/ai/*`는 `server-only` — Client Component에서 import하면 빌드가 실패한다.
 
 ## 디자인 시스템
 

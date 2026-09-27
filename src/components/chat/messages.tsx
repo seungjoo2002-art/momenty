@@ -4,13 +4,13 @@ import { AIBadge, VerifiedMark } from "@/components/badges";
 import { Avatar } from "@/components/ui/Avatar";
 import type { Creator, Moment } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
-import { formatClock, formatTime, shortName } from "@/lib/utils/format";
+import { formatClock, formatTime } from "@/lib/utils/format";
 
 /**
  * 세 종류의 말풍선은 절대 비슷해 보이지 않는다.
- *  - Creator AI : 흰 말풍선 + 작은 "AI" 라벨 + "OO AI" 이름
+ *  - Creator AI : 흰 말풍선 + "🤖 {이름} AI" + "AI" 라벨 (크리에이터 본인의 말이 아니다)
  *  - 팬(나)     : 보라 말풍선, 흰 글자, 오른쪽
- *  - 실제 본인  : 라벤더 말풍선 + 보라 테두리 + 인증 체크 + "본인" 라벨, 아바타 보라 링
+ *  - 실제 본인  : 라벤더 말풍선 + 보라 테두리 + "✓ {이름}" + "본인" 라벨, 아바타 보라 링 (Human takeover 단계에서 사용)
  */
 
 export function AIMessage({
@@ -19,17 +19,17 @@ export function AIMessage({
   createdAt,
   refMoments = [],
 }: {
-  creator: Creator;
+  creator: Pick<Creator, "name" | "avatarUrl">;
   text: string;
   createdAt: string;
-  refMoments?: Moment[];
+  refMoments?: Pick<Moment, "id" | "createdAt">[];
 }) {
   return (
     <div className="flex gap-2 pr-12">
       <Avatar src={creator.avatarUrl} name={creator.name} size="sm" ring="ai" />
       <div className="min-w-0">
         <div className="mb-1 flex items-center gap-1">
-          <span className="text-meta text-ink-2">{shortName(creator.name)} AI</span>
+          <span className="text-meta text-ink-2">🤖 {creator.name} AI</span>
           <AIBadge />
         </div>
         <div className="rounded-[18px] rounded-tl-[6px] bg-surface px-3.5 py-2.5 text-sub text-ink ring-1 ring-line ring-inset">
@@ -59,7 +59,7 @@ export function CreatorMessage({ creator, text, createdAt }: { creator: Creator;
       <Avatar src={creator.avatarUrl} name={creator.name} size="sm" ring="human" />
       <div className="min-w-0">
         <div className="mb-1 flex items-center gap-1">
-          <span className="text-meta font-semibold text-brand-deep">{creator.name}</span>
+          <span className="text-meta font-semibold text-brand-deep">✓ {creator.name}</span>
           <VerifiedMark className="size-3.5" />
           <span className="rounded-full bg-brand px-1.5 py-px text-micro font-semibold text-white">본인</span>
         </div>

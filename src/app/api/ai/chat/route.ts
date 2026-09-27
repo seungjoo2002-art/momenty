@@ -1,22 +1,30 @@
 /**
- * POST /api/ai/chat — Persona AI의 서버 입구 (v0.5-1: 실제 LLM은 아직 부르지 않는다).
+ * POST /api/ai/chat — Creator Persona AI의 서버 입구.
  *
- *   1. 인증      쿠키 세션 → Auth 서버 검증(getUser)          없으면 401
- *   2. 입력 검증  zod strict 스키마 (정의 밖 필드 거부)          잘못되면 400
- *   3. 권한      크리에이터 존재 404 · 구독 등급 · Persona 사용 여부 403  (LLM 호출 전, 서버에서)
- *   4. 횟수 제한  user × creator × 시간 창                     넘으면 429
- *   5. Context   사용자 세션 + RLS로 볼 수 있고 AI 참고 허용된 Moment만
- *   6. 응답      구조화된 결과 + AI 메타데이터 (Context 내용 · 프롬프트는 돌려주지 않는다)
+ *   1. 인증        쿠키 세션 → Auth 서버 검증(getUser) · 다른 Origin 거부           401 · 403
+ *   2. 입력 검증    zod strict (정의 밖 필드 거부)                                  400
+ *   3. 권한        ai_persona_context(서버 키, creatorId) — DB가 판단                404 · 403
+ *                  (존재 · 본인 채널 아님 · Persona ON · 설정됨 · subscriber/premium)
+ *   4. 횟수 제한    consume_ai_rate_limit(서버 키, creatorId) — Postgres 공유 카운터    429
+ *   5. Context     팬 세션 + RLS로 볼 수 있고 AI 참고 허용된 오늘 Moment · focus Moment · 최근 대화
+ *   6. 경계(전)    팬 메시지 주제 검사 → 막힌 주제면 거절 모드 (Today · 사실 제외)
+ *   7. Prompt      SYSTEM → STYLE → PERSONALITY → FACTS → BOUNDARIES → TODAY → FAN → CONVERSATION → USER
+ *   8. Provider    (설정되어 있으면) LLM 호출
+ *   9. 경계(후)    위치 · 만남 · 유출 · 사칭 검사 → 걸리면 고정 거절 문장
+ *  10. 저장        record_ai_exchange(서버 키, …) — 근거 Moment는 DB가 다시 검증
  *
- * 메시지 내용은 1~5단계 어디에도 쓰이지 않는다 → "이전 지시 무시해" 같은 메시지로 권한 · 데이터 범위가 바뀌지 않는다.
- * service role은 쓰지 않는다.
+ * 팬 메시지 내용은 1~5단계에 쓰이지 않는다 → prompt injection으로 권한 · 데이터 범위가 바뀌지 않는다.
+ * service role은 쓰지 않는다 — 팬의 JWT + AI_SERVER_KEY.
+ * Provider가 아직 설정되지 않았으면 LLM을 부르지 않고 저장도 하지 않는다 (reply: null · status: provider_not_configured).
  */
 import { randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { auditAi, type AiAuditEvent, type AiResponseMeta } from "@/lib/ai/audit";
-import { describeAiProvider, getAiProviderConfig } from "@/lib/ai/config";
-import { contextTypesOf, createContextBuilder } from "@/lib/ai/context";
-import { authorizePersonaChat } from "@/lib/ai/policy";
+import { AiConfigError, getAiServerKey } from "@/lib/ai/config";
+import { contextTypesOf, createContextBuilder, loadPersona, loadRecentConversation, PersonaAccessError, type PersonaDenial } from "@/lib/ai/context";
+import { fallbackReply, postcheck, precheck, type GuardTopic } from "@/lib/ai/guard";
+import { buildPersonaPrompt, CONVERSATION_WINDOW, parseModelOutput } from "@/lib/ai/prompt";
+import { getPersonaProvider, ProviderError } from "@/lib/ai/provider";
 import { aiRateLimiter } from "@/lib/ai/rateLimit";
 import { aiChatRequestSchema } from "@/lib/ai/schema";
 import { createServerSupabase } from "@/lib/supabase/server";
@@ -30,10 +38,12 @@ const MESSAGES = {
   invalid_input: "요청 형식이 올바르지 않아요.",
   forbidden_origin: "허용되지 않은 요청이에요.",
   creator_not_found: "크리에이터를 찾을 수 없어요.",
-  persona_disabled: "이 크리에이터는 Creator AI를 쓰지 않아요.",
+  persona_disabled: "이 크리에이터는 지금 Creator AI를 쓰지 않아요.",
+  persona_not_configured: "이 크리에이터의 Creator AI가 아직 준비되지 않았어요.",
   own_channel: "내 채널의 Creator AI와는 대화할 수 없어요.",
   subscription_required: "Creator AI 대화는 구독자에게 열려요.",
   rate_limited: "잠시 후 다시 시도해 주세요.",
+  ai_unavailable: "Creator AI가 잠시 답할 수 없어요. 잠시 후 다시 시도해 주세요.",
   error: "잠시 후 다시 시도해 주세요.",
 } as const;
 
@@ -54,6 +64,8 @@ function sameOrigin(req: NextRequest) {
     return false;
   }
 }
+
+const KST_TIME = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
 
 export async function POST(req: NextRequest) {
   const requestId = randomUUID();
@@ -81,72 +93,166 @@ export async function POST(req: NextRequest) {
       return fail(requestId, 400, "invalid_input", { outcome: "invalid_input" }, { issues });
     }
     const input = parsed.data;
+    const serverKey = getAiServerKey();
 
-    // 3. 권한 (LLM 호출 전 · 사용자 세션 + RLS)
-    const authz = await authorizePersonaChat(sb, user.id, input.creatorId);
-    if (!authz.ok) {
-      return fail(requestId, authz.status, authz.code, { outcome: authz.status === 404 ? "not_found" : "forbidden", creatorId: input.creatorId });
+    // 3. 권한 + Persona (DB가 판단 · 팬의 JWT + 서버 키)
+    let persona;
+    try {
+      persona = await loadPersona(sb, serverKey, input.creatorId);
+    } catch (e) {
+      if (e instanceof PersonaAccessError) {
+        const status = e.code === "creator_not_found" ? 404 : 403;
+        return fail(requestId, status, e.code satisfies PersonaDenial, { outcome: status === 404 ? "not_found" : "forbidden", creatorId: input.creatorId });
+      }
+      throw e;
     }
 
-    // 4. 횟수 제한
-    const limit = await aiRateLimiter().consume({ userId: user.id, creatorId: authz.creator.id, scope: "ai_chat" });
+    // 4. 횟수 제한 (Postgres)
+    const limit = await aiRateLimiter(sb).consume(persona.creator.id);
     if (!limit.allowed) {
       const retryAfter = Math.max(1, Math.ceil((Date.parse(limit.resetAt) - Date.now()) / 1000));
       return fail(
         requestId,
         429,
         "rate_limited",
-        { outcome: "rate_limited", creatorId: authz.creator.id },
+        { outcome: "rate_limited", creatorId: persona.creator.id },
         { resetAt: limit.resetAt, rule: limit.rule },
         { "Retry-After": String(retryAfter) },
       );
     }
 
-    // 5. Context (요청한 사용자가 볼 수 있고 AI 참고가 허용된 것만)
-    const ctx = await createContextBuilder(sb, authz.creator).build({
-      creatorId: authz.creator.id,
-      fanId: user.id,
-      conversationId: input.conversationId,
-      focusMomentId: input.momentId,
-    });
+    // 5. Context (팬 세션 + RLS)
+    const [ctx, conversation] = await Promise.all([
+      createContextBuilder(sb, persona.creator).build({
+        creatorId: persona.creator.id,
+        fanId: user.id,
+        conversationId: input.conversationId,
+        focusMomentId: input.momentId,
+      }),
+      loadRecentConversation(sb, user.id, persona.creator.id, CONVERSATION_WINDOW),
+    ]);
 
-    // 6. 응답 — v0.5-2에서 여기서 Provider를 부른다 (ctx + 서버가 만든 system prompt + 팬 메시지)
-    const provider = describeAiProvider();
+    // 6. 경계(전)
+    const declineTopic: GuardTopic | null = precheck(input.message, persona.boundaries);
+
+    // 7. Prompt
+    const prompt = buildPersonaPrompt({
+      persona,
+      today: ctx.today.items,
+      focus: ctx.focus,
+      conversation,
+      userMessage: input.message,
+      declineTopic,
+      nowLabel: KST_TIME.format(new Date()),
+    });
+    const contextTypes = declineTopic
+      ? (["style", "personality", "boundaries"] as const)
+      : ([
+          "style",
+          "personality",
+          ...(persona.facts.length ? (["facts"] as const) : []),
+          "boundaries",
+          ...contextTypesOf(ctx).filter((t): t is "today" | "focus" => t === "today" || t === "focus"),
+          ...(conversation.length ? (["conversation"] as const) : []),
+        ] as const);
+
     const meta: AiResponseMeta = {
       author: "ai",
-      persona: { creatorId: authz.creator.id, name: authz.creator.name },
+      persona: { creatorId: persona.creator.id, name: persona.creator.name },
       generated: false,
-      provider: provider.provider,
-      model: provider.model,
+      provider: null,
+      model: null,
       context: {
-        types: contextTypesOf(ctx),
-        momentIds: ctx.today.items.map((m) => m.id),
-        focusMomentId: ctx.focus?.id ?? null,
+        types: [...contextTypes],
+        momentIds: declineTopic ? [] : [...prompt.momentAliases.values()],
+        focusMomentId: declineTopic ? null : (ctx.focus?.id ?? null),
       },
     };
-    auditAi({
-      event: "ai_chat",
-      requestId,
-      outcome: "ok",
-      status: 200,
-      creatorId: authz.creator.id,
-      messageLength: input.message.length,
-      contextTypes: meta.context.types,
-      contextCount: meta.context.momentIds.length,
+
+    // 8. Provider
+    const provider = getPersonaProvider();
+    if (!provider) {
+      auditAi({ event: "ai_chat", requestId, outcome: "ok", status: 200, creatorId: persona.creator.id, messageLength: input.message.length, contextTypes: meta.context.types, contextCount: meta.context.momentIds.length });
+      return NextResponse.json(
+        { ok: true, requestId, reply: null, status: "provider_not_configured", meta, rateLimit: { remaining: limit.remaining, resetAt: limit.resetAt } },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
+    let replyText: string;
+    let groundedIds: string[] = [];
+    let boundary: string | null = declineTopic;
+    try {
+      const out = await provider.generatePersonaReply({ system: prompt.system, messages: prompt.messages, maxTokens: prompt.maxTokens, requestId });
+      if (out.refused) {
+        replyText = fallbackReply("platform_safety", persona.style.formality, persona.creator.name);
+        boundary = "platform_safety";
+      } else {
+        const parsedOut = parseModelOutput(out.text, prompt.momentAliases);
+        replyText = parsedOut.reply;
+        groundedIds = declineTopic ? [] : parsedOut.momentIds;
+      }
+      meta.generated = true;
+      meta.provider = out.provider;
+      meta.model = out.model;
+    } catch (e) {
+      if (e instanceof ProviderError) {
+        console.error("[momenty/ai] provider failed", requestId, e.message);
+        return fail(requestId, 503, "ai_unavailable", { outcome: "error", creatorId: persona.creator.id });
+      }
+      throw e;
+    }
+
+    // 9. 경계(후) — 걸리면 모델의 답은 버린다
+    // 모델이 본 근거 원문 — 여기 없는 장소 이름은 추측으로 본다
+    const groundText = [
+      ...(declineTopic ? [] : ctx.today.items.map((m) => m.content)),
+      ...(declineTopic || !ctx.focus ? [] : [ctx.focus.content]),
+      ...persona.facts.map((f) => f.content),
+      ...conversation.map((t) => t.content),
+      input.message,
+    ].join("\n");
+    const violation = postcheck({ reply: replyText, boundaries: persona.boundaries, creatorName: persona.creator.name, facts: persona.facts.map((f) => f.content), groundText });
+    if (violation || !replyText.trim()) {
+      const topic = violation ?? "leak";
+      replyText = fallbackReply(topic, persona.style.formality, persona.creator.name);
+      groundedIds = [];
+      boundary = topic === "leak" || topic === "impersonation" ? boundary : topic;
+    }
+    replyText = replyText.slice(0, 4000);
+
+    // 10. 저장 (근거 Moment는 DB가 다시 걸러낸다)
+    const { data: saved, error: saveError } = await sb.rpc("record_ai_exchange", {
+      p_server_key: serverKey,
+      p_creator_id: persona.creator.id,
+      p_fan_message: input.message,
+      p_ai_reply: replyText,
+      p_grounded_moment_ids: groundedIds,
+      p_context_types: meta.context.types,
+      p_provider: meta.provider,
+      p_model: meta.model,
+      p_boundary: boundary,
     });
+    if (saveError) throw saveError;
+    meta.context.momentIds = (saved as { groundedMomentIds: string[] }).groundedMomentIds;
+
+    auditAi({ event: "ai_chat", requestId, outcome: "ok", status: 200, creatorId: persona.creator.id, messageLength: input.message.length, contextTypes: meta.context.types, contextCount: meta.context.momentIds.length });
     return NextResponse.json(
       {
         ok: true,
         requestId,
-        reply: null,
-        status: getAiProviderConfig() ? "llm_not_enabled" : "provider_not_configured",
+        reply: replyText,
+        status: "generated",
+        conversationId: (saved as { conversationId: string }).conversationId,
+        message: { id: (saved as { aiMessageId: string }).aiMessageId, sender: "ai", content: replyText, boundary, groundedMomentIds: meta.context.momentIds },
         meta,
         rateLimit: { remaining: limit.remaining, resetAt: limit.resetAt },
       },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (e) {
-    console.error("[momenty/ai] request failed", requestId, e instanceof Error ? e.name : "unknown");
+    if (e instanceof AiConfigError) console.error("[momenty/ai] server config missing", requestId, e.missing);
+    else console.error("[momenty/ai] request failed", requestId, e instanceof Error ? e.name : "unknown");
     return fail(requestId, 500, "error", { outcome: "error" });
   }
 }

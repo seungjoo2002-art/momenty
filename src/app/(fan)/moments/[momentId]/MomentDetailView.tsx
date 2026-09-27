@@ -138,12 +138,12 @@ export function MomentDetailView({ momentId }: { momentId: string }) {
               </div>
             )}
 
-            {FEATURES.creatorAI && canChat(tier) && (
+            {FEATURES.creatorAI && canChat(tier) && creator.personaEnabled && (
               <Link
                 href={`/chat/${creator.id}?moment=${moment.id}`}
                 className="mt-4 flex items-center justify-between border-t border-white/10 px-1 py-3.5 text-caption text-white/60 hover:text-white"
               >
-                이 순간에 대해 AI와 이야기하기
+                이 순간에 대해 Creator AI와 이야기하기
                 <ChevronRight className="size-4" />
               </Link>
             )}

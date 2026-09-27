@@ -55,10 +55,10 @@ export default function StudioSettingsPage() {
       </section>
 
       <section className="mt-7">
-        <SectionHeader title="Creator AI & 안전" caption="Creator AI와 함께 열려요" />
+        <SectionHeader title="Creator AI & 안전" caption="AI가 나를 대신해 말하는 방식과 한계" />
         <ListGroup>
-          <ListRow icon={<MessagesSquare className={icon} />} label="Persona" description="말투, 참고할 Moment 범위" />
-          <ListRow icon={<Ban className={icon} />} label="Boundary" description="AI가 답하지 않을 주제와 질문" />
+          <ListRow href="/studio/settings/persona" icon={<MessagesSquare className={icon} />} label="Creator AI · Persona" description="켜기 · 말투 · 성향 · 확인된 사실" />
+          <ListRow href="/studio/settings/persona#boundaries" icon={<Ban className={icon} />} label="대화 경계" description="AI가 답하지 않을 주제" />
           <ListRow icon={<ShieldCheck className={icon} />} label="SafeShare" description="위치 · 얼굴 · 개인정보 보호" />
         </ListGroup>
       </section>

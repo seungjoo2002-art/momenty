@@ -64,6 +64,16 @@ async function fails(uid, sql, params = []) {
 
 const count = async (uid, sql, params) => (await as(uid, sql, params)).rows.length;
 
+/** 거부되었고, 그 이유(오류 메시지)가 기대한 것인지 — 다른 이유로 우연히 실패한 것을 통과로 치지 않는다 */
+async function failsWith(uid, sql, params, pattern) {
+  try {
+    await as(uid, sql, params);
+    return false;
+  } catch (e) {
+    return pattern.test(String(e.message));
+  }
+}
+
 await db.exec(SUPABASE_STUB);
 for (const f of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql")).sort()) {
   await db.exec(readFileSync(join(MIGRATIONS, f), "utf8"));
@@ -334,6 +344,219 @@ check("비로그인 호출 불가", await fails(null, `select * from public.orph
   const rows = (await db.query(`select name from public.orphan_moment_media(interval '1 day')`)).rows.map((r) => r.name);
   await db.exec("reset role");
   check("service role: 참조 없는 오래된 파일만 (c1/orphan.jpg)", rows.length === 1 && rows[0] === "c1/orphan.jpg", rows);
+}
+
+/* ======================= v0.5-2 Persona · AI 대화 · rate limit ======================= */
+const KEY = "server-key-for-tests-0123456789abcdef-XYZ";
+await db.query(`insert into private.server_keys (id, key_hash) values ('ai', encode(sha256(convert_to($1, 'UTF8')), 'hex'))`, [KEY]);
+const aiOffId = "10000000-0000-0000-0000-0000000000a0";
+const c2MomentId = "10000000-0000-0000-0000-0000000000c2";
+await db.exec(`
+  insert into public.moments (id, creator_id, type, content, visibility, ai_context_enabled) values
+    ('${aiOffId}', 'c1', 'text', 'AI 참고 꺼짐', 'public', false),
+    ('${c2MomentId}', 'c2', 'text', '다른 크리에이터', 'public', true);
+`);
+
+console.log("\nv0.5 · Persona 설정 테이블 (크리에이터 본인만)");
+const personaSql = `insert into public.creator_personas (creator_id, formality, reply_length, laugh_kk, emoji_level, phrases, mood, example_messages, traits)
+  values ($1, 'casual', 'short', true, 2, '{"오늘도 화이팅"}', '따뜻한', '{"안녕 ㅋㅋ 오늘 날씨 좋다"}', '{"warm","playful"}')`;
+check("다른 크리에이터가 c1 Persona 생성 → RLS 거부", await failsWith(U.creatorB, personaSql, ["c1"], /row-level security/));
+check("팬이 c1 Persona 생성 → RLS 거부", await failsWith(U.premium, personaSql, ["c1"], /row-level security/));
+check("크리에이터 본인 Persona 생성 → 성공", !(await fails(U.creatorA, personaSql, ["c1"])));
+check("팬(Premium)은 Persona 원본을 읽을 수 없음 (0행)", (await count(U.premium, `select * from public.creator_personas`)) === 0);
+check("다른 크리에이터도 읽을 수 없음 (0행)", (await count(U.creatorB, `select * from public.creator_personas`)) === 0);
+check("비로그인 읽기 → 거부", await fails(null, `select * from public.creator_personas`));
+check("본인은 읽기 · 수정 가능", (await as(U.creatorA, `update public.creator_personas set mood = '차분한' where creator_id = 'c1' returning 1`)).rows.length === 1);
+check("다른 크리에이터 수정 → 0행", (await as(U.creatorB, `update public.creator_personas set mood = 'x' where creator_id = 'c1' returning 1`)).rows.length === 0);
+check("허용되지 않은 성향 값 → 거부", await fails(U.creatorA, `update public.creator_personas set traits = '{"evil"}' where creator_id = 'c1'`));
+check("자주 쓰는 표현 11개 → 거부", await fails(U.creatorA, `update public.creator_personas set phrases = array_fill('ㅋ'::text, array[11]) where creator_id = 'c1'`));
+check("표현 한 개가 41자 → 거부", await fails(U.creatorA, `update public.creator_personas set phrases = array[repeat('가', 41)] where creator_id = 'c1'`));
+check("존댓말/반말 외 값 → 거부", await fails(U.creatorA, `update public.creator_personas set formality = 'rude' where creator_id = 'c1'`));
+check("created_at 수정 → 거부 (컬럼 권한)", await fails(U.creatorA, `update public.creator_personas set created_at = '2020-01-01' where creator_id = 'c1'`));
+
+console.log("\nv0.5 · Verified Facts");
+const factSql = `insert into public.creator_facts (creator_id, category, content) values ($1, 'food', $2) returning id, last_verified_at`;
+check("다른 크리에이터가 c1 사실 추가 → RLS 거부", await failsWith(U.creatorB, factSql, ["c1", "가짜 사실"], /row-level security/));
+check("팬이 c1 사실 추가 → RLS 거부", await failsWith(U.premium, factSql, ["c1", "가짜 사실"], /row-level security/));
+const fact = (await as(U.creatorA, factSql, ["c1", "좋아하는 음식은 초밥"])).rows[0];
+check("본인 사실 추가 → 성공 (last_verified_at 자동)", !!fact?.id && !!fact.last_verified_at);
+const inactive = (await as(U.creatorA, factSql, ["c1", "예전에 좋아하던 것 (비활성)"])).rows[0];
+await as(U.creatorA, `update public.creator_facts set active = false where id = $1`, [inactive.id]);
+check("팬은 사실 원본을 읽을 수 없음 (0행)", (await count(U.premium, `select * from public.creator_facts`)) === 0);
+check("source 지정 → 거부 (컬럼 권한)", await fails(U.creatorA, `insert into public.creator_facts (creator_id, content, source) values ('c1', 'x', 'creator_studio')`));
+check("created_at 지정 → 거부", await fails(U.creatorA, `insert into public.creator_facts (creator_id, content, created_at) values ('c1', 'x', '2020-01-01')`));
+{
+  await as(U.creatorA, `update public.creator_facts set last_verified_at = '2000-01-01' where id = $1`, [fact.id]);
+  const r = (await db.query(`select last_verified_at > now() - interval '1 minute' as fresh from public.creator_facts where id = $1`, [fact.id])).rows[0];
+  check("last_verified_at을 과거로 조작 → 서버 시각(now)으로 저장", r?.fresh === true);
+}
+check("빈 내용 → 거부", await fails(U.creatorA, factSql, ["c1", "   "]));
+check("다른 크리에이터가 c1 사실 삭제 → 0행", (await as(U.creatorB, `delete from public.creator_facts where creator_id = 'c1' returning 1`)).rows.length === 0);
+
+console.log("\nv0.5 · Boundaries · Persona ON/OFF");
+check("본인 Boundary 설정 → 성공", !(await fails(U.creatorA, `insert into public.creator_boundaries (creator_id, topic, allowed) values ('c1', 'jokes', false)`)));
+check("정의 밖 topic → 거부", await fails(U.creatorA, `insert into public.creator_boundaries (creator_id, topic, allowed) values ('c1', 'anything', true)`));
+check("다른 크리에이터가 c1 Boundary 설정 → RLS 거부", await failsWith(U.creatorB, `insert into public.creator_boundaries (creator_id, topic, allowed) values ('c1', 'sexual', true)`, [], /row-level security/));
+check("팬은 Boundary 원본을 읽을 수 없음", (await count(U.premium, `select * from public.creator_boundaries`)) === 0);
+check("다른 크리에이터가 c1 persona_enabled 끄기 → 0행", (await as(U.creatorB, `update public.creators set persona_enabled = false where id = 'c1' returning 1`)).rows.length === 0);
+check("본인이 persona_enabled 끄기/켜기 → 성공",
+  (await as(U.creatorA, `update public.creators set persona_enabled = false where id = 'c1' returning 1`)).rows.length === 1 &&
+  (await as(U.creatorA, `update public.creators set persona_enabled = true where id = 'c1' returning 1`)).rows.length === 1);
+
+console.log("\nv0.5 · ai_persona_context (서버 키 + 팬 권한)");
+const ctxSql = `select public.ai_persona_context($1, $2) as ctx`;
+check("비로그인 → 거부", await fails(null, ctxSql, [KEY, "c1"]));
+check("서버 키 없이 (구독자 JWT만) → server_key_required", await failsWith(U.subscriber, ctxSql, [null, "c1"], /server_key_required/));
+check("틀린 서버 키 → server_key_required", await failsWith(U.subscriber, ctxSql, ["wrong-key-wrong-key-wrong-key-wrong-key", "c1"], /server_key_required/));
+check("무료 팔로워 → subscription_required", await failsWith(U.follower, ctxSql, [KEY, "c1"], /subscription_required/));
+check("크리에이터 본인 → own_channel", await failsWith(U.creatorA, ctxSql, [KEY, "c1"], /own_channel/));
+check("Persona 미설정 크리에이터(c2) → persona_not_configured", await failsWith(U.subscriber, ctxSql, [KEY, "c2"], /persona_not_configured/));
+check("없는 크리에이터 → creator_not_found", await failsWith(U.subscriber, ctxSql, [KEY, "nobody"], /creator_not_found/));
+{
+  const ctx = (await as(U.subscriber, ctxSql, [KEY, "c1"])).rows[0]?.ctx;
+  check("구독자 + 서버 키 → Persona Context", ctx?.style?.formality === "casual" && ctx.personality.traits.includes("warm"));
+  check("활성 사실만 (비활성 제외)", ctx?.facts.length === 1 && ctx.facts[0].content === "좋아하는 음식은 초밥");
+  check("사실에는 분류 · 내용만 (출처 · 시각 없음)", ctx && Object.keys(ctx.facts[0]).sort().join() === "category,content");
+  check("Boundary 기본값 + 크리에이터 설정 (jokes 금지, current_location 금지, everyday 허용)",
+    ctx?.boundaries.jokes === false && ctx.boundaries.current_location === false && ctx.boundaries.everyday === true && Object.keys(ctx.boundaries).length === 10);
+}
+await as(U.creatorA, `update public.creators set persona_enabled = false where id = 'c1'`);
+check("Persona OFF → 구독자도 persona_disabled", await failsWith(U.subscriber, ctxSql, [KEY, "c1"], /persona_disabled/));
+await as(U.creatorA, `update public.creators set persona_enabled = true where id = 'c1'`);
+
+console.log("\nv0.5 · 회귀 A — 활성 Fact 50개 제한 우회");
+{
+  const add = (content, active = true) =>
+    as(U.creatorA, `insert into public.creator_facts (creator_id, content, active) values ('c1', $1, $2) returning id`, [content, active]);
+  // 지금 활성 1개(초밥) → 49개 더 → 50개
+  for (let i = 0; i < 49; i++) await add(`활성 사실 ${i}`);
+  const activeCount = async () => Number((await db.query(`select count(*)::int as n from public.creator_facts where creator_id = 'c1' and active`)).rows[0].n);
+  check("활성 50개까지는 허용", (await activeCount()) === 50);
+  check("51번째 활성 insert → 거부", await failsWith(U.creatorA, `insert into public.creator_facts (creator_id, content) values ('c1', '51번째')`, [], /too many active facts/));
+  const parked = [];
+  for (let i = 0; i < 5; i++) parked.push((await add(`비활성 ${i}`, false)).rows[0].id);
+  check("비활성 사실은 50개 한도와 무관하게 추가 가능", parked.length === 5);
+  check("공격: 비활성 → active=true 전환 (1개) → 거부",
+    await failsWith(U.creatorA, `update public.creator_facts set active = true where id = $1`, [parked[0]], /too many active facts/));
+  check("공격: 비활성 전부 한 번에 active=true → 거부 · 하나도 활성화되지 않음",
+    (await failsWith(U.creatorA, `update public.creator_facts set active = true where creator_id = 'c1' and not active`, [], /too many active facts/)) &&
+      (await activeCount()) === 50);
+  check("이미 활성인 사실의 내용 수정은 허용 (개수가 늘지 않음)",
+    (await as(U.creatorA, `update public.creator_facts set content = '좋아하는 음식은 초밥' where creator_id = 'c1' and content = '좋아하는 음식은 초밥' returning 1`)).rows.length === 1);
+  const one = (await db.query(`select id from public.creator_facts where creator_id = 'c1' and active and content = '활성 사실 0'`)).rows[0].id;
+  await as(U.creatorA, `update public.creator_facts set active = false where id = $1`, [one]);
+  check("하나를 끄면 다른 하나를 켤 수 있음 (교체)", (await as(U.creatorA, `update public.creator_facts set active = true where id = $1 returning 1`, [parked[0]])).rows.length === 1);
+  check("교체 후에도 활성 50개", (await activeCount()) === 50);
+  // 정리: 원래 상태(활성 1 · 비활성 1)로
+  await db.exec(`delete from public.creator_facts where creator_id = 'c1' and (content like '활성 사실 %' or content like '비활성 %')`);
+}
+
+console.log("\nv0.5 · AI 대화 저장 (record_ai_exchange만)");
+check("팬이 ai_conversations 직접 생성 → permission denied", await failsWith(U.subscriber, `insert into public.ai_conversations (fan_id, creator_id) values ($1, 'c1')`, [U.subscriber], /permission denied/));
+const rec = `select public.record_ai_exchange($1, 'c1', '오늘 뭐 했어?', 'AI 답', $2::uuid[], '{"today"}', 'anthropic', 'm') as r`;
+check("서버 키 없이 기록 → server_key_required", await failsWith(U.subscriber, rec, [null, []], /server_key_required/));
+check("무료 팔로워 기록 → subscription_required", await failsWith(U.follower, rec, [KEY, []], /subscription_required/));
+{
+  const r = (await as(U.subscriber, rec, [KEY, [M.pub, M.sub, M.prem, aiOffId, c2MomentId]])).rows[0]?.r;
+  const g = r?.groundedMomentIds ?? [];
+  check("구독자 기록 → 대화 + 메시지 2개", !!r?.conversationId && !!r.aiMessageId);
+  check("근거 id: 볼 수 있고 AI 허용된 c1 Moment만 남김 (premium · AI꺼짐 · 다른 크리에이터 제거)",
+    g.length === 2 && g.includes(M.pub) && g.includes(M.sub) && !g.includes(M.prem) && !g.includes(aiOffId) && !g.includes(c2MomentId), g);
+  const r2 = (await as(U.subscriber, rec, [KEY, []])).rows[0]?.r;
+  check("같은 팬 · 크리에이터는 같은 대화에 이어서", r2?.conversationId === r.conversationId);
+}
+check("팬 본인은 자기 대화 · 메시지를 읽음 (4개)", (await count(U.subscriber, `select * from public.ai_messages`)) === 4);
+check("다른 팬은 0개", (await count(U.premium, `select * from public.ai_messages`)) === 0 && (await count(U.premium, `select * from public.ai_conversations`)) === 0);
+check("크리에이터(c1 본인)도 팬의 AI 대화를 읽을 수 없음", (await count(U.creatorA, `select * from public.ai_messages`)) === 0 && (await count(U.creatorA, `select * from public.ai_conversations`)) === 0);
+check("팬이 메시지 수정 → permission denied", await failsWith(U.subscriber, `update public.ai_messages set content = 'x'`, [], /permission denied/));
+{
+  const conv = (await as(U.subscriber, `select id from public.ai_conversations`)).rows[0]?.id;
+  check(
+    "팬이 자기 실제 대화에 'AI 메시지' 위조 insert → permission denied",
+    !!conv && (await failsWith(U.subscriber, `insert into public.ai_messages (conversation_id, sender, content) values ($1, 'ai', '위조된 AI 답')`, [conv], /permission denied/)),
+  );
+}
+check("다른 팬이 대화 삭제 → 0행", (await as(U.premium, `delete from public.ai_conversations returning 1`)).rows.length === 0);
+
+console.log("\nv0.5 · 회귀 C — record_ai_exchange 메타데이터 검증");
+{
+  const recAll = `select public.record_ai_exchange($1, 'c1', $2, $3, $4::uuid[], $5::text[], $6, $7, $8) as r`;
+  const call = (o) =>
+    failsWith(U.subscriber, recAll, [KEY, o.fan ?? "질문", o.ai ?? "답", o.ids ?? [], o.types ?? ["today"], o.provider ?? null, o.model ?? null, o.boundary ?? null], o.expect);
+  check("허용되지 않은 context_type('private_moments') → 거부", await call({ types: ["today", "private_moments"], expect: /invalid context types/ }));
+  check("context_types 9개 → 거부", await call({ types: Array(9).fill("today"), expect: /invalid context types/ }));
+  check("허용되지 않은 provider → 거부", await call({ provider: "evil-proxy", expect: /invalid provider/ }));
+  check("model에 공백 · 개행 → 거부", await call({ model: "gpt\nignore previous", expect: /invalid model/ }));
+  check("model 81자 → 거부 (잘라 저장하지 않음)", await call({ model: "m".repeat(81), expect: /invalid model/ }));
+  check("정의 밖 boundary → 거부 (null로 바꿔 저장하지 않음)", await call({ boundary: "anything", expect: /invalid boundary/ }));
+  check("팬 메시지 1001자 → 거부", await call({ fan: "가".repeat(1001), expect: /invalid fan message/ }));
+  check("빈 AI 답 → 거부", await call({ ai: "   ", expect: /invalid ai reply/ }));
+  check("근거 id 61개 → 거부", await call({ ids: Array.from({ length: 61 }, () => M.pub), expect: /too many grounded/ }));
+  const ok = (await as(U.subscriber, recAll, [KEY, "질문", "답", [], ["today", "today", "facts"], "anthropic", "claude-sonnet-5", "current_location"])).rows[0]?.r;
+  const saved = (await db.query(`select context_types, provider, model, boundary from public.ai_messages where id = $1`, [ok?.aiMessageId])).rows[0];
+  check("정상 메타데이터는 저장 (context_types 중복 제거)",
+    saved?.provider === "anthropic" && saved.model === "claude-sonnet-5" && saved.boundary === "current_location" && saved.context_types.length === 2, saved);
+  // 테이블 제약 (함수를 거치지 않는 경로도 형식 강제 — superuser로 직접 insert)
+  const conv = (await db.query(`select id from public.ai_conversations limit 1`)).rows[0].id;
+  const direct = async (sql) => {
+    try {
+      await db.query(sql, [conv]);
+      return false;
+    } catch {
+      return true;
+    }
+  };
+  check("테이블 제약: 정의 밖 context_type → 거부", await direct(`insert into public.ai_messages (conversation_id, sender, content, context_types) values ($1, 'ai', 'x', '{"evil"}')`));
+  check("테이블 제약: 정의 밖 provider → 거부", await direct(`insert into public.ai_messages (conversation_id, sender, content, provider) values ($1, 'ai', 'x', 'evil')`));
+  check("테이블 제약: 팬 메시지에 AI 메타데이터 → 거부", await direct(`insert into public.ai_messages (conversation_id, sender, content, provider) values ($1, 'fan', 'x', 'openai')`));
+  check("테이블 제약: 팬 메시지 1001자 → 거부", await direct(`insert into public.ai_messages (conversation_id, sender, content) values ($1, 'fan', repeat('가', 1001))`));
+}
+
+console.log("\nv0.5 · 공유 rate limit (Postgres)");
+// 정책 값은 서버 관리자만 (테스트 준비: superuser로 한도를 3 / 5 / 600으로)
+await db.exec(`update private.ai_settings set rate_per_creator = 3, rate_per_user = 5, rate_window_sec = 600`);
+const rl = `select public.consume_ai_rate_limit($1, $2) as r`;
+check("서버 키 없이 → server_key_required", await failsWith(U.subscriber, rl, [null, "c1"], /server_key_required/));
+check("비로그인 → 실행 권한 없음", await failsWith(null, rl, [KEY, "c1"], /permission denied/));
+check("private 테이블 직접 조회 → permission denied", await failsWith(U.subscriber, `select * from private.ai_rate_limits`, [], /permission denied/));
+check("server_keys 해시 직접 조회 → permission denied", await failsWith(U.subscriber, `select * from private.server_keys`, [], /permission denied/));
+check("private 함수 직접 호출 → permission denied", await failsWith(U.subscriber, `select private.hit_bucket('x', interval '1 hour')`, [], /permission denied/));
+{
+  const seq = [];
+  for (let i = 0; i < 4; i++) seq.push((await as(U.subscriber, rl, [KEY, "c1"])).rows[0].r);
+  check("user × creator 3회 허용 → 4번째 거부 (per_creator)", seq.slice(0, 3).every((r) => r.allowed) && seq[3].allowed === false && seq[3].rule === "per_creator", seq.map((r) => r.allowed));
+  const other = [];
+  for (let i = 0; i < 2; i++) other.push((await as(U.subscriber, rl, [KEY, "c2"])).rows[0].r);
+  check("user 전체 5회: 다른 크리에이터 2회 중 2번째에서 거부 (per_user)", other[0].allowed === true && other[1].allowed === false && other[1].rule === "per_user", other);
+  const mine = (await as(U.premium, rl, [KEY, "c1"])).rows[0].r;
+  check("다른 사용자는 별도 한도", mine.allowed === true);
+  const counted = (await db.query(`select count from private.ai_rate_limits where bucket = $1`, [`ai_chat:${U.subscriber}:c1`])).rows[0]?.count;
+  check("거부된 시도도 세어 순서대로 누적 (잃어버린 업데이트 없음)", counted === 4, counted);
+  await db.query(`update private.ai_rate_limits set window_start = now() - interval '11 minutes' where bucket like $1`, [`ai_chat:${U.subscriber}%`]);
+  const after = (await as(U.subscriber, rl, [KEY, "c1"])).rows[0].r;
+  check("시간 창이 지나면 다시 허용", after.allowed === true && after.remaining === 2, after);
+  check("잘못된 creatorId 형식 → 거부", await failsWith(U.subscriber, rl, [KEY, "../x"], /invalid creator id/));
+}
+
+console.log("\nv0.5 · 회귀 B — 호출자가 rate limit 값을 정하려는 공격");
+{
+  check("한도 · 창을 인자로 넘기는 호출(예전 5인자) → 함수 없음",
+    await failsWith(U.subscriber, `select public.consume_ai_rate_limit($1, 'c1', 100000, 100000, 86400)`, [KEY], /does not exist/));
+  check("named 인자로 한도 지정 → 함수 없음",
+    await failsWith(U.subscriber, `select public.consume_ai_rate_limit(p_server_key => $1, p_creator_id => 'c1', p_per_creator => 999)`, [KEY], /does not exist/));
+  check("정책 테이블 읽기 → permission denied", await failsWith(U.subscriber, `select * from private.ai_settings`, [], /permission denied/));
+  check("정책 테이블 수정(한도 올리기) → permission denied",
+    await failsWith(U.subscriber, `update private.ai_settings set rate_per_creator = 100000`, [], /permission denied/));
+  check("한도 카운터 초기화(삭제) → permission denied", await failsWith(U.subscriber, `delete from private.ai_rate_limits`, [], /permission denied/));
+  const r = (await as(U.follower, rl, [KEY, "c9"])).rows[0].r;
+  check("공격 후에도 한도는 서버 설정값 그대로 (3 / 5)", r.allowed === true && r.remaining === 2, r);
+  const cfg = (await db.query(`select rate_per_creator, rate_per_user, rate_window_sec from private.ai_settings`)).rows[0];
+  check("정책 값 변경 없음", cfg.rate_per_creator === 3 && cfg.rate_per_user === 5 && cfg.rate_window_sec === 600, cfg);
+  const defaults = Object.fromEntries(
+    (await db.query(`select column_name, column_default from information_schema.columns where table_schema = 'private' and table_name = 'ai_settings'`)).rows.map((r) => [r.column_name, r.column_default]),
+  );
+  check("migration 기본 정책: 20 / 60 / 600초", defaults.rate_per_creator === "20" && defaults.rate_per_user === "60" && defaults.rate_window_sec === "600", defaults);
+  await db.exec(`update private.ai_settings set rate_per_creator = 20, rate_per_user = 60, rate_window_sec = 600`);
 }
 
 console.log("\nCascade");
