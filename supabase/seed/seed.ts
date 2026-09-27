@@ -13,7 +13,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import { creators } from "@/lib/mock/creators";
-import { currentFan } from "@/lib/mock/fan";
+import { demoFan } from "@/lib/mock/fan";
 import { buildMockDay, buildPastMoments } from "@/lib/mock/moments";
 import type { Moment } from "@/lib/types";
 import { kstDate } from "@/lib/utils/format";
@@ -111,16 +111,18 @@ function momentRow(m: Moment, key: string) {
 }
 
 async function seed() {
-  const fanEmail = process.env.NEXT_PUBLIC_DEMO_FAN_EMAIL;
-  const fanPassword = process.env.NEXT_PUBLIC_DEMO_FAN_PASSWORD;
-  const creatorEmail = process.env.NEXT_PUBLIC_DEMO_CREATOR_EMAIL;
-  const creatorPassword = process.env.NEXT_PUBLIC_DEMO_CREATOR_PASSWORD;
+  // 데모 계정 — 앱 화면은 읽지 않는다 (seed · 테스트 전용, 서버 환경 변수)
+  const env = (k: string) => process.env[`DEMO_${k}`];
+  const fanEmail = env("FAN_EMAIL");
+  const fanPassword = env("FAN_PASSWORD");
+  const creatorEmail = env("CREATOR_EMAIL");
+  const creatorPassword = env("CREATOR_PASSWORD");
   if (!fanEmail || !fanPassword || !creatorEmail || !creatorPassword) {
-    fail("NEXT_PUBLIC_DEMO_FAN_EMAIL/PASSWORD, NEXT_PUBLIC_DEMO_CREATOR_EMAIL/PASSWORD 를 .env.local에 설정하세요.");
+    fail("DEMO_FAN_EMAIL/PASSWORD, DEMO_CREATOR_EMAIL/PASSWORD 를 .env.local에 설정하세요.");
   }
 
   // 1) 사용자 — 데모 팬 1명, 데모 크리에이터(c1) + 나머지 크리에이터 7명
-  const fanId = await ensureUser(fanEmail, fanPassword, currentFan.nickname);
+  const fanId = await ensureUser(fanEmail, fanPassword, demoFan.nickname);
   const profileOf: Record<string, string> = {};
   for (const c of creators) {
     profileOf[c.id] =
@@ -132,7 +134,7 @@ async function seed() {
 
   // 2) profiles (가입 trigger가 만든 행을 채운다)
   const profiles = [
-    { id: fanId, nickname: currentFan.nickname, handle: currentFan.handle, avatar_url: currentFan.avatarUrl },
+    { id: fanId, nickname: demoFan.nickname, handle: demoFan.handle, avatar_url: demoFan.avatarUrl },
     ...creators.map((c) => ({ id: profileOf[c.id], nickname: c.name, handle: c.handle, avatar_url: c.avatarUrl })),
   ];
   const { error: pErr } = await db.from("profiles").upsert(profiles);
@@ -164,7 +166,7 @@ async function seed() {
 
   // 4) 데모 팬의 구독 (결제 연동 전이므로 seed가 직접 넣는다)
   const { error: sErr } = await db.from("subscriptions").upsert(
-    currentFan.subscriptions.map((s) => ({
+    demoFan.subscriptions.map((s) => ({
       fan_id: fanId,
       creator_id: s.creatorId,
       tier: s.tier,
@@ -174,7 +176,7 @@ async function seed() {
     { onConflict: "fan_id,creator_id" },
   );
   if (sErr) throw sErr;
-  console.log(`✓ 구독 ${currentFan.subscriptions.length}건 (데모 팬)`);
+  console.log(`✓ 구독 ${demoFan.subscriptions.length}건 (데모 팬)`);
 
   // 5) Moment — 지난 하루는 처음 한 번만, 오늘은 지금까지 지난 시각의 것만 (다시 실행하면 이어서 채움)
   const today = kstDate();

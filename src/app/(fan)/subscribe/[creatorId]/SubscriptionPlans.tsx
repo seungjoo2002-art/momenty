@@ -2,15 +2,18 @@
 
 import { Check, Crown, Loader2 } from "lucide-react";
 import { useState } from "react";
+import { useAccount } from "@/components/auth/AuthProvider";
 import { SubscriptionBadge, VerifiedMark } from "@/components/badges";
 import { Avatar } from "@/components/ui/Avatar";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Photo } from "@/components/ui/Photo";
 import { TopBar } from "@/components/ui/TopBar";
-import { startSubscriptionCheckout } from "@/lib/services/payments";
+import { FEATURES } from "@/lib/constants";
+import { useMomentData } from "@/lib/hooks/useMomentData";
+import { follow, getTier } from "@/lib/services/fan";
 import type { Creator, Tier } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
-import { formatPrice } from "@/lib/utils/format";
+import { formatPrice, shortName } from "@/lib/utils/format";
 
 interface Plan {
   tier: Tier;
@@ -19,7 +22,15 @@ interface Plan {
   perks: string[];
 }
 
-export function SubscriptionPlans({ creator, currentTier }: { creator: Creator; currentTier?: Tier }) {
+/**
+ * 플랜 안내. 무료 팔로우는 실제로 저장된다.
+ * 유료 구독(구독 · Premium)은 결제 연동 전이라 시작할 수 없다 — 결제 없이 등급을 올리는 경로는 없다 (DB도 거부).
+ */
+export function SubscriptionPlans({ creator }: { creator: Creator }) {
+  const account = useAccount();
+  const { data } = useMomentData(`tier:${creator.id}:${account?.userId ?? ""}`, async () => ({ tier: await getTier(creator.id) }));
+  const currentTier = data?.tier;
+  const isOwner = account?.creator?.id === creator.id;
   const plans: Plan[] = [
     {
       tier: "follow",
@@ -31,7 +42,7 @@ export function SubscriptionPlans({ creator, currentTier }: { creator: Creator; 
       tier: "subscriber",
       name: "구독",
       price: creator.pricing.subscriber,
-      perks: ["구독자 전용 Moment", "오늘의 Moment 기반 Creator AI 대화 (하루 30회)", "지난 30일 Archive"],
+      perks: ["구독자 전용 Moment", "지난 30일 Archive"],
     },
     {
       tier: "premium",
@@ -39,21 +50,29 @@ export function SubscriptionPlans({ creator, currentTier }: { creator: Creator; 
       price: creator.pricing.premium,
       perks: [
         "Premium 전용 Moment (음성 인사, 비하인드)",
-        "Creator AI 대화 무제한 · Fan Memory",
-        "크리에이터 본인의 직접 답장 기회",
         "전체 Archive",
       ],
     },
   ];
 
-  const [selected, setSelected] = useState<Tier>(currentTier === "premium" ? "premium" : "subscriber");
+  const [selected, setSelected] = useState<Tier>("follow");
   const [status, setStatus] = useState<"idle" | "loading" | "done">("idle");
+  const [error, setError] = useState<string | null>(null);
   const plan = plans.find((p) => p.tier === selected)!;
+  const paid = selected !== "follow";
+  const alreadyIn = !!currentTier && (currentTier === selected || (selected === "follow" && currentTier !== "follow"));
 
-  async function checkout() {
+  async function start() {
+    if (paid) return; // 결제 연동 전
     setStatus("loading");
-    await startSubscriptionCheckout(creator.id, selected);
-    setStatus("done");
+    setError(null);
+    try {
+      await follow(creator.id);
+      setStatus("done");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "팔로우하지 못했어요.");
+      setStatus("idle");
+    }
   }
 
   if (status === "done") {
@@ -62,10 +81,10 @@ export function SubscriptionPlans({ creator, currentTier }: { creator: Creator; 
         <Avatar src={creator.avatarUrl} name={creator.name} size="2xl" ring="today" />
         <SubscriptionBadge tier={selected} className="mt-5" />
         <h1 className="mt-3 text-title font-bold">
-          이제 {creator.name.slice(1)}의 하루를
-          <br />더 가까이에서 함께해요
+          이제 {shortName(creator.name)}의 하루를
+          <br />함께 따라가요
         </h1>
-        <p className="mt-2 text-sub text-muted">프로토타입에서는 실제 결제가 이루어지지 않아요.</p>
+        <p className="mt-2 text-sub text-muted">공개 Moment가 Today에 바로 이어져요.</p>
         <div className="mt-8 w-full space-y-2">
           <ButtonLink href={`/creators/${creator.id}/today`} size="lg" block>
             오늘의 하루 보러 가기
@@ -134,25 +153,22 @@ export function SubscriptionPlans({ creator, currentTier }: { creator: Creator; 
             </button>
           );
         })}
-        <p className="px-1 pt-1 text-meta leading-relaxed text-muted">
-          Creator AI는 {creator.name} 님이 공개를 허락한 오늘의 Moment만 참고해요. AI 답변은 항상 AI로 표시되며, 크리에이터 본인의 말과
-          구분돼요.
-        </p>
       </section>
 
       <div className="sticky bottom-0 mt-6 border-t border-line bg-canvas/90 px-4 pt-3 pb-[max(env(safe-area-inset-bottom),16px)] backdrop-blur-md">
-        <Button
-          size="lg"
-          block
-          disabled={status === "loading" || selected === currentTier}
-          onClick={checkout}
-        >
+        {error && <p role="alert" className="mb-2 text-center text-caption text-danger">{error}</p>}
+        {paid && !FEATURES.payments && !alreadyIn && (
+          <p className="mb-2 text-center text-meta text-muted">유료 구독은 결제 연동 후 열려요. 지금은 무료 팔로우로 함께할 수 있어요.</p>
+        )}
+        <Button size="lg" block disabled={!data || isOwner || status === "loading" || alreadyIn || paid} onClick={start}>
           {status === "loading" && <Loader2 className="size-5 animate-spin" />}
-          {selected === currentTier
-            ? "이미 이용 중인 플랜이에요"
-            : plan.price
-              ? `${formatPrice(plan.price)} / 월 구독 시작하기`
-              : "무료로 팔로우하기"}
+          {isOwner
+            ? "내 채널이에요"
+            : alreadyIn
+              ? "이미 이용 중인 플랜이에요"
+              : paid
+                ? `${formatPrice(plan.price)} / 월 · 결제 준비 중`
+                : "무료로 팔로우하기"}
         </Button>
       </div>
     </main>

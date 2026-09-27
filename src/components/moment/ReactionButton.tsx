@@ -1,7 +1,10 @@
 "use client";
 
 import { Heart } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
+import { useAccount } from "@/components/auth/AuthProvider";
+import { loginHref } from "@/components/auth/Gates";
 import { toggleLove } from "@/lib/services/moments";
 import type { Moment } from "@/lib/types";
 import { totalReactions } from "@/lib/utils/access";
@@ -22,6 +25,9 @@ export function ReactionButton({
   tone?: "default" | "dark";
 }) {
   const [pending, setPending] = useState(false);
+  const account = useAccount();
+  const router = useRouter();
+  const pathname = usePathname();
   const on = moment.likedByMe ?? false;
   const total = totalReactions(moment.reactions);
   const dark = tone === "dark";
@@ -40,6 +46,10 @@ export function ReactionButton({
       type="button"
       disabled={pending}
       onClick={() => {
+        if (!account) {
+          router.push(loginHref(pathname));
+          return;
+        }
         setPending(true);
         // 실패해도(네트워크 · 로그인 없음) 화면은 그대로 — 저장된 상태만 보여준다
         toggleLove(moment.id)

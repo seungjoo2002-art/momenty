@@ -3,6 +3,7 @@
 import { ChevronDown, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useStudioCreator } from "@/components/auth/Gates";
 import { MOMENT_TYPE_META } from "@/components/moment/meta";
 import { MomentCard } from "@/components/moment/MomentCard";
 import { VisibilitySelector } from "@/components/studio/VisibilitySelector";
@@ -10,29 +11,34 @@ import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
 import { ToggleRow } from "@/components/ui/Toggle";
 import { TopBar } from "@/components/ui/TopBar";
-import { clearDraft, getDraft, saveDraft, type MomentDraft } from "@/lib/services/drafts";
+import { clearDraft, getDraft, getDraftMedia, saveDraft, type DraftMedia, type MomentDraft } from "@/lib/services/drafts";
 import { createMoment } from "@/lib/services/moments";
 import type { Creator, Moment } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
 import { formatClock } from "@/lib/utils/format";
 
-/** 작성 중인 Draft를 불러와 팬에게 보일 모습을 보여준다. Draft가 없으면 기록 화면으로. */
-export function MomentPreview({ creator }: { creator: Creator }) {
+/**
+ * 작성 중인 Draft를 불러와 팬에게 보일 모습을 보여준다.
+ * Draft가 없거나, 파일이 필요한데 파일이 없으면(새로고침) 기록 화면으로.
+ */
+export function MomentPreview() {
+  const creator = useStudioCreator();
   const router = useRouter();
-  const [draft, setDraft] = useState<MomentDraft | null>(null);
+  const [ready, setReady] = useState<{ draft: MomentDraft; media: DraftMedia | null } | null>(null);
 
   useEffect(() => {
     getDraft(creator.id).then((d) => {
-      if (d) setDraft(d);
-      else router.replace("/studio/record");
+      const media = getDraftMedia(creator.id);
+      if (!d || (d.type !== "text" && (!media || media.type !== d.type))) router.replace("/studio/record");
+      else setReady({ draft: d, media });
     });
   }, [creator.id, router]);
 
-  if (!draft) return <main className="min-h-dvh" />;
-  return <PreviewBody creator={creator} initial={draft} />;
+  if (!ready) return <main className="min-h-dvh" />;
+  return <PreviewBody creator={creator} initial={ready.draft} media={ready.media} />;
 }
 
-function PreviewBody({ creator, initial }: { creator: Creator; initial: MomentDraft }) {
+function PreviewBody({ creator, initial, media }: { creator: Creator; initial: MomentDraft; media: DraftMedia | null }) {
   const router = useRouter();
   const [draft, setDraft] = useState(initial);
   const [createdAt] = useState(() => new Date().toISOString());
@@ -40,7 +46,7 @@ function PreviewBody({ creator, initial }: { creator: Creator; initial: MomentDr
   const [moreOpen, setMoreOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const content = draft.content || (draft.type === "voice" ? "지금의 목소리" : "");
+  const content = draft.content;
 
   // 팬에게 보일 모습 — 저장 전이라 id·반응은 비어 있다
   const moment: Moment = {
@@ -48,8 +54,9 @@ function PreviewBody({ creator, initial }: { creator: Creator; initial: MomentDr
     creatorId: creator.id,
     type: draft.type,
     content,
-    mediaUrl: draft.media,
-    durationSec: draft.durationSec,
+    mediaUrl: media?.previewUrl,
+    posterUrl: media?.posterUrl,
+    durationSec: media?.durationSec ?? draft.durationSec,
     createdAt,
     visibility: draft.visibility,
     reactions: { love: 0, cheer: 0, touched: 0, smile: 0 },
@@ -71,13 +78,13 @@ function PreviewBody({ creator, initial }: { creator: Creator; initial: MomentDr
     setPublishing(true);
     setError(null);
     try {
-      // TODO(Supabase): 사진은 Storage 업로드 후 media_path 저장
+      // 파일 업로드 → moments 저장 (저장이 실패하면 올린 파일은 서비스가 지운다)
       await createMoment({
         creatorId: creator.id,
         type: draft.type,
         content,
-        mediaUrl: draft.media,
-        durationSec: draft.durationSec,
+        media: media ? { file: media.file, poster: media.poster } : undefined,
+        durationSec: media?.durationSec ?? draft.durationSec,
         visibility: draft.visibility,
         aiContextEnabled: draft.aiContextEnabled,
       });
@@ -113,7 +120,7 @@ function PreviewBody({ creator, initial }: { creator: Creator; initial: MomentDr
         <VisibilitySelector
           value={draft.visibility}
           onChange={(visibility) => change({ visibility })}
-          audience={{ public: creator.followers, subscribers: creator.subscribers, premium: Math.round(creator.subscribers * 0.28) }}
+          audience={{ public: creator.followers, subscribers: creator.subscribers }}
         />
       </section>
 
@@ -124,7 +131,7 @@ function PreviewBody({ creator, initial }: { creator: Creator; initial: MomentDr
           aria-expanded={moreOpen}
           className="flex h-10 w-full items-center justify-between text-caption text-muted"
         >
-          AI 참고 · SafeShare 설정
+          AI 참고 설정
           <ChevronDown className={cn("size-4 transition-transform duration-200", moreOpen && "rotate-180")} />
         </button>
         {moreOpen && (
@@ -135,9 +142,8 @@ function PreviewBody({ creator, initial }: { creator: Creator; initial: MomentDr
               defaultOn={draft.aiContextEnabled}
               onChange={(aiContextEnabled) => change({ aiContextEnabled })}
             />
-            {/* TODO(SafeShare): 위치 지연 · 얼굴 흐림은 아직 저장되지 않는다 */}
-            <ToggleRow title="위치 지연 공개" description="이 장소를 떠난 뒤 30분 후 위치가 공개돼요." defaultOn />
-            <ToggleRow title="타인 얼굴 자동 흐림" description="함께 찍힌 사람의 얼굴을 흐리게 처리해요." defaultOn />
+            {/* SafeShare(위치 지연 · 얼굴 흐림)는 아직 없다 — 사진의 위치 정보(EXIF)는 업로드 전에 지운다 */}
+            <p className="px-4 py-3.5 text-caption leading-relaxed text-muted">사진의 위치 정보(EXIF)는 올리기 전에 지워져요.</p>
           </div>
         )}
       </section>
@@ -150,7 +156,7 @@ function PreviewBody({ creator, initial }: { creator: Creator; initial: MomentDr
           </Button>
           <Button size="lg" className="flex-1" onClick={publish} disabled={publishing}>
             {publishing && <Loader2 className="size-5 animate-spin" />}
-            공개하기
+            {publishing ? (media ? "올리는 중…" : "공개하는 중…") : "공개하기"}
           </Button>
         </div>
       </div>

@@ -11,7 +11,10 @@
     "test:db": "tsx supabase/tests/rls.test.mjs",
     "test:backend": "tsx supabase/tests/backend.test.mts",
     "db:seed": "tsx supabase/seed/seed.ts",
-    "test:live": "tsx supabase/tests/live.test.mts"
+    "test:live": "tsx supabase/tests/live.test.mts",
+    "db:cleanup-media": "tsx supabase/seed/cleanup-media.ts",
+    "test:e2e": "tsx supabase/tests/e2e.test.mts",
+    "test:ui": "tsx supabase/tests/ui.e2e.mts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",
@@ -29,6 +32,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.6",
+    "playwright-core": "^1.63.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
     "typescript": "^5"

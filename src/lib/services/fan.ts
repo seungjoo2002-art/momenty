@@ -1,69 +1,82 @@
 /**
- * 로그인한 팬 기준 데이터 (세션 / 구독 / 채팅 / Fan Memory).
+ * 로그인한 사용자의 팬 쪽 관계 — 팔로우/구독 (subscriptions) · 보관함 (moment_bookmarks).
  *
- * Supabase 설정 시 (브라우저): fan 세션의 profiles + subscriptions
- *   - 서버 렌더링에는 팬 세션이 없으므로 Mock 팬을 쓴다 (Chat 목록 · 구독 · My 화면 — 아직 Mock 단계)
- *   - 보관함(savedMomentIds)은 아직 DB에 없다 → 빈 목록
- * 채팅 · Fan Memory는 이번 단계에서 연동하지 않는다 (Mock).
+ * 팔로우(무료)는 팬 본인이 만들고 취소한다 (RLS: tier = 'follow'만, 자기 채널은 안 됨).
+ * 유료 등급(subscriber · premium)은 결제 서버(service role)만 만들 수 있다 — 결제는 아직 연동하지 않았다.
  */
-import { buildChatThreads, currentFan, fanMemory } from "@/lib/mock/fan";
-import { getCreators } from "@/lib/services/creators";
-import { getAllTodayMoments } from "@/lib/services/moments";
-import { isSupabaseConfigured, sessionUserId, supabaseFor } from "@/lib/supabase/client";
-import type { ChatThread, Creator, FanMemoryItem, FanUser, Moment, Tier } from "@/lib/types";
-import { toServiceError } from "./errors";
+import { currentUserId, supabase } from "@/lib/supabase/client";
+import type { Creator, FanUser, Moment, Tier } from "@/lib/types";
+import { getCreators, invalidateCreators } from "./creators";
+import { ServiceError, toServiceError } from "./errors";
+import { getMomentsByIds, getTodayMomentsFor, notifyMomentsChanged } from "./moments";
 
-const GUEST: FanUser = {
-  id: "",
-  nickname: "게스트",
-  handle: "guest",
-  avatarUrl: "",
-  joinedAt: "",
-  subscriptions: [],
-  savedMomentIds: [],
-};
+const GUEST: FanUser = { id: "", subscriptions: [] };
 
-async function loadFan(): Promise<FanUser> {
-  const uid = await sessionUserId("fan");
+/** 로그인하지 않았으면 id = "" · 관계 없음 */
+export async function getCurrentFan(): Promise<FanUser> {
+  const uid = await currentUserId();
   if (!uid) return GUEST;
-  const sb = await supabaseFor("fan");
-  const [profile, subs] = await Promise.all([
-    sb.from("profiles").select("id, nickname, handle, avatar_url, created_at").eq("id", uid).maybeSingle(),
-    sb.from("subscriptions").select("creator_id, tier, started_at, renews_at").eq("fan_id", uid),
-  ]);
-  if (profile.error) throw profile.error;
-  if (subs.error) throw subs.error;
-  const p = profile.data;
+  const { data, error } = await supabase()
+    .from("subscriptions")
+    .select("creator_id, tier, started_at, renews_at")
+    .eq("fan_id", uid)
+    .order("started_at", { ascending: false });
+  if (error) throw toServiceError(error, "내 정보를 불러오지 못했어요.");
   return {
     id: uid,
-    nickname: p?.nickname || GUEST.nickname,
-    handle: p?.handle ?? "",
-    avatarUrl: p?.avatar_url ?? "",
-    joinedAt: p?.created_at?.slice(0, 10) ?? "",
-    subscriptions: (subs.data ?? []).map((s) => ({
+    subscriptions: (data ?? []).map((s) => ({
       creatorId: s.creator_id as string,
       tier: s.tier as Tier,
       since: String(s.started_at).slice(0, 10),
       renewsAt: s.renews_at ? String(s.renews_at).slice(0, 10) : undefined,
     })),
-    savedMomentIds: [],
   };
-}
-
-let cachedFan: Promise<FanUser> | null = null;
-
-export async function getCurrentFan(): Promise<FanUser> {
-  if (!isSupabaseConfigured || typeof window === "undefined") return currentFan;
-  cachedFan ??= loadFan().catch((e) => {
-    cachedFan = null;
-    throw toServiceError(e, "내 정보를 불러오지 못했어요.");
-  });
-  return cachedFan;
 }
 
 export async function getTier(creatorId: string): Promise<Tier | undefined> {
   return (await getCurrentFan()).subscriptions.find((s) => s.creatorId === creatorId)?.tier;
 }
+
+/* ---------- 팔로우 ---------- */
+
+export async function follow(creatorId: string): Promise<void> {
+  const uid = await currentUserId();
+  if (!uid) throw new ServiceError("로그인하면 팔로우할 수 있어요.", "auth");
+  try {
+    const { error } = await supabase().from("subscriptions").insert({ fan_id: uid, creator_id: creatorId, tier: "follow" });
+    // 이미 팔로우(또는 구독) 중이면 그대로 둔다
+    if (error && error.code !== "23505") throw error;
+    invalidateCreators();
+    notifyMomentsChanged();
+  } catch (e) {
+    const err = e as { code?: string };
+    if (err?.code === "42501") throw new ServiceError("내 채널은 팔로우할 수 없어요.", "forbidden", e);
+    throw toServiceError(e, "팔로우하지 못했어요.");
+  }
+}
+
+/** 무료 팔로우만 취소할 수 있다 (유료 구독은 결제 관리에서 — RLS도 막는다) */
+export async function unfollow(creatorId: string): Promise<void> {
+  const uid = await currentUserId();
+  if (!uid) throw new ServiceError("로그인이 필요해요.", "auth");
+  try {
+    const { data, error } = await supabase()
+      .from("subscriptions")
+      .delete()
+      .eq("fan_id", uid)
+      .eq("creator_id", creatorId)
+      .eq("tier", "follow")
+      .select("id");
+    if (error) throw error;
+    if (!data?.length) throw new ServiceError("유료 구독은 여기서 취소할 수 없어요.", "forbidden");
+    invalidateCreators();
+    notifyMomentsChanged();
+  } catch (e) {
+    throw toServiceError(e, "팔로우를 취소하지 못했어요.");
+  }
+}
+
+/* ---------- Today ---------- */
 
 export interface TodayFeedItem {
   creator: Creator;
@@ -71,16 +84,17 @@ export interface TodayFeedItem {
   moments: Moment[];
 }
 
-/** Today Home: 팔로우/구독 중인 크리에이터와 각자의 오늘 */
+/** Today Home: 팔로우/구독 중인 크리에이터와 각자의 오늘 (실제로 남긴 Moment만) */
 export async function getTodayFeed(): Promise<TodayFeedItem[]> {
-  const [fan, creators, todayMoments] = await Promise.all([getCurrentFan(), getCreators(), getAllTodayMoments()]);
+  const fan = await getCurrentFan();
+  if (!fan.subscriptions.length) return [];
+  const ids = fan.subscriptions.map((s) => s.creatorId);
+  const [creators, todayMoments] = await Promise.all([getCreators(), getTodayMomentsFor(ids)]);
   return fan.subscriptions
     .flatMap((s) => {
       const creator = creators.find((c) => c.id === s.creatorId);
       if (!creator) return [];
-      const moments = todayMoments
-        .filter((m) => m.creatorId === s.creatorId);
-      return [{ creator, tier: s.tier, moments }];
+      return [{ creator, tier: s.tier, moments: todayMoments.filter((m) => m.creatorId === s.creatorId) }];
     })
     .sort((a, b) => {
       // 가장 최근에 Moment를 남긴 크리에이터가 위로
@@ -90,22 +104,42 @@ export async function getTodayFeed(): Promise<TodayFeedItem[]> {
     });
 }
 
-export async function getChatThreads(): Promise<ChatThread[]> {
-  return buildChatThreads();
+/* ---------- 보관함 ---------- */
+
+export async function getSavedMomentIds(): Promise<string[]> {
+  const uid = await currentUserId();
+  if (!uid) return [];
+  const { data, error } = await supabase()
+    .from("moment_bookmarks")
+    .select("moment_id")
+    .eq("user_id", uid)
+    .order("created_at", { ascending: false });
+  if (error) throw toServiceError(error, "보관함을 불러오지 못했어요.");
+  return (data ?? []).map((r) => r.moment_id as string);
 }
 
-export async function getChatThread(creatorId: string): Promise<ChatThread> {
-  return (
-    buildChatThreads().find((t) => t.creatorId === creatorId) ?? {
-      id: `t-${creatorId}`,
-      creatorId,
-      fanId: currentFan.id,
-      unread: 0,
-      messages: [],
+export async function getSavedMoments(): Promise<Moment[]> {
+  const ids = await getSavedMomentIds();
+  const list = await getMomentsByIds(ids);
+  return ids.flatMap((id) => list.filter((m) => m.id === id));
+}
+
+/** 보관 토글 — 보관된 상태가 되면 true (볼 수 있는 Moment만 보관할 수 있다 · RLS) */
+export async function toggleSaved(momentId: string, saved: boolean): Promise<boolean> {
+  const uid = await currentUserId();
+  if (!uid) throw new ServiceError("로그인하면 보관할 수 있어요.", "auth");
+  try {
+    const sb = supabase();
+    if (saved) {
+      const { error } = await sb.from("moment_bookmarks").delete().eq("user_id", uid).eq("moment_id", momentId);
+      if (error) throw error;
+    } else {
+      const { error } = await sb.from("moment_bookmarks").insert({ user_id: uid, moment_id: momentId });
+      if (error && error.code !== "23505") throw error;
     }
-  );
-}
-
-export async function getFanMemory(): Promise<FanMemoryItem[]> {
-  return fanMemory;
+    notifyMomentsChanged();
+    return !saved;
+  } catch (e) {
+    throw toServiceError(e, "보관하지 못했어요.");
+  }
 }

@@ -1,6 +1,6 @@
 import type { Moment, MomentType, Reactions, Visibility } from "@/lib/types";
 import { daysAgoDate, kstIso } from "@/lib/utils/format";
-import { dailyCover, draftPhoto, momentMedia } from "./images";
+import { dailyCover, seedPhoto, momentMedia } from "./images";
 
 const r = (love: number, cheer = 0, touched = 0, smile = 0): Reactions => ({ love, cheer, touched, smile });
 
@@ -219,7 +219,7 @@ export function buildPastMoments(): Moment[] {
           content: type === "voice" ? "짧게 남기는 목소리" : FILLER[(k * 3 + dayIndex) % FILLER.length],
           visibility: FILLER_VISIBILITY[(k + dayIndex) % FILLER_VISIBILITY.length],
           reactions: r(Math.round(base * 0.25) + k * 13, 20, 30, 10),
-          ...(type === "photo" ? { mediaUrl: draftPhoto(creatorId, dayIndex * 7 + k) } : {}),
+          ...(type === "photo" ? { mediaUrl: seedPhoto(creatorId, dayIndex * 7 + k) } : {}),
           ...(type === "voice" ? { durationSec: 30 + ((k * 13 + dayIndex * 7) % 90) } : {}),
         };
       });

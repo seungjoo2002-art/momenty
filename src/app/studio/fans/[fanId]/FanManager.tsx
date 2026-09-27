@@ -10,7 +10,7 @@ import { ToggleRow } from "@/components/ui/Toggle";
 import { TopBar } from "@/components/ui/TopBar";
 import type { Creator, FanProfile } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
-import { formatShortDate } from "@/lib/utils/format";
+import { formatShortDate, shortName } from "@/lib/utils/format";
 
 /** 개별 팬 관리: 직접 답장(본인 참여), AI 응대 범위, 제한 */
 export function FanManager({ fan, creator }: { fan: FanProfile; creator: Creator }) {
@@ -81,7 +81,7 @@ export function FanManager({ fan, creator }: { fan: FanProfile; creator: Creator
               value={reply}
               onChange={(e) => setReply(e.target.value)}
               rows={2}
-              placeholder={`${creator.name.slice(1)} 님이 직접 쓰는 한마디`}
+              placeholder={`${shortName(creator.name)} 님이 직접 쓰는 한마디`}
               className="flex-1 resize-none rounded-tile border border-line-strong px-4 py-2.5 text-body outline-none placeholder:text-faint focus:border-brand"
             />
             <button

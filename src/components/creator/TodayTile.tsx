@@ -6,6 +6,7 @@ import { Photo } from "@/components/ui/Photo";
 import { RelativeTime } from "@/components/ui/RelativeTime";
 import type { Creator, Moment, Tier } from "@/lib/types";
 import { pickTodayPreview } from "./todayPreview";
+import { shortName } from "@/lib/utils/format";
 
 /**
  * Today Home의 compact 타일 (2열 그리드).
@@ -16,7 +17,7 @@ import { pickTodayPreview } from "./todayPreview";
 export function TodayTile({ creator, tier, moments }: { creator: Creator; tier: Tier; moments: Moment[] }) {
   const { latest, visual, visible } = pickTodayPreview(moments, tier);
   const href = `/creators/${creator.id}/today`;
-  const name = `${creator.name.slice(1)}의 오늘`;
+  const name = `${shortName(creator.name)}의 오늘`;
 
   const footer = (onImage: boolean) => (
     <div className="min-w-0">

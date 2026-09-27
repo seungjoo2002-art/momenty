@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { emptyDraft, getDraft, type MomentDraft } from "@/lib/services/drafts";
+import { useStudioCreator } from "@/components/auth/Gates";
+import { emptyDraft, getDraft, setDraftMedia, type MomentDraft } from "@/lib/services/drafts";
 import type { MomentType } from "@/lib/types";
 import { RecordComposer } from "./RecordComposer";
 
@@ -11,12 +12,14 @@ import { RecordComposer } from "./RecordComposer";
  * - 같은 유형으로 다시 들어온 경우
  * 다른 유형으로 들어오면 새로 시작한다.
  */
-export function RecordScreen({ requestedType, creatorId }: { requestedType?: MomentType; creatorId: string }) {
+export function RecordScreen({ requestedType }: { requestedType?: MomentType }) {
+  const { id: creatorId } = useStudioCreator();
   const [initial, setInitial] = useState<MomentDraft | null>(null);
 
   useEffect(() => {
     getDraft(creatorId).then((draft) => {
       const resume = draft && (!requestedType || draft.type === requestedType);
+      if (!resume) setDraftMedia(creatorId, null);
       setInitial(resume ? draft : emptyDraft(creatorId, requestedType ?? "photo"));
     });
   }, [creatorId, requestedType]);

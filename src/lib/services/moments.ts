@@ -1,37 +1,25 @@
 /**
  * Moment / Today / Daily 데이터 접근 레이어.
- * 화면은 이 파일의 함수만 호출한다 — 저장소가 무엇인지 알지 못한다.
- *
- * 저장소
- *   Supabase 환경 변수가 있으면 → backends/moments.supabase.ts (public.moments · moment_feed · moment_reactions)
- *   없으면(로컬 개발)          → backends/moments.local.ts (localStorage + Mock seed)
+ * 화면은 이 파일의 함수만 호출한다 (저장소는 Supabase — backends/moments.supabase.ts).
  *
  * Today = 특정 날짜(KST)의 Moment를 createdAt 오름차순으로 나열한 것. 빈 시간 슬롯은 없다.
  * Daily = 지난 날짜의 Moment를 KST 날짜별로 묶어서 계산한다 (Daily 테이블은 따로 없다).
  */
-import { buildMockDay, buildPastMoments } from "@/lib/mock/moments";
-import { isSupabaseConfigured } from "@/lib/supabase/client";
-import type { DailyRecord, FanUser, Moment } from "@/lib/types";
+import type { DailyRecord, FanUser, Moment, ReactionKey } from "@/lib/types";
 import { canViewMoment, totalReactions } from "@/lib/utils/access";
 import { dateKeyOf, kstDate, kstDayRange } from "@/lib/utils/format";
-import { localMoments } from "./backends/moments.local";
-import { supabaseMoments } from "./backends/moments.supabase";
+import { supabaseMoments as backend } from "./backends/moments.supabase";
 import type { MomentPatch, NewMoment } from "./backends/types";
 
 export type { MomentPatch, NewMoment } from "./backends/types";
+export { clearSignedUrls, notifyMomentsChanged } from "./backends/moments.supabase";
 
-const backend = isSupabaseConfigured ? supabaseMoments : localMoments;
-
-/** Moment가 추가·수정·삭제되거나 반응이 바뀌면 호출된다 */
+/** Moment가 추가·수정·삭제되거나 반응 · 보관함이 바뀌면 호출된다 */
 export function subscribeMoments(listener: () => void): () => void {
   return backend.subscribe(listener);
 }
 
 /* ---------- 조회 ---------- */
-
-export async function getMoments(): Promise<Moment[]> {
-  return backend.list({});
-}
 
 /** 없거나, 지워졌거나, 잘못된 id면 undefined */
 export async function getMoment(id: string): Promise<Moment | undefined> {
@@ -40,11 +28,6 @@ export async function getMoment(id: string): Promise<Moment | undefined> {
 
 export async function getMomentsByIds(ids: string[]): Promise<Moment[]> {
   return ids.length ? backend.list({ ids }) : [];
-}
-
-/** 크리에이터의 모든 Moment, 시간순 */
-export async function getCreatorMoments(creatorId: string): Promise<Moment[]> {
-  return backend.list({ creatorIds: [creatorId] });
 }
 
 /** 크리에이터가 특정 날짜(KST)에 남긴 Moment, 시간순 */
@@ -57,24 +40,26 @@ export async function getTodayMoments(creatorId: string): Promise<Moment[]> {
   return getMomentsOn(creatorId, kstDate());
 }
 
-/** 모든 크리에이터의 오늘 Moment, 시간순 */
+/** 여러 크리에이터의 오늘 Moment, 시간순 */
+export async function getTodayMomentsFor(creatorIds: string[]): Promise<Moment[]> {
+  if (!creatorIds.length) return [];
+  return backend.list({ creatorIds, ...kstDayRange(kstDate()) });
+}
+
+/** 모든 크리에이터의 오늘 Moment (Discover), 시간순 */
 export async function getAllTodayMoments(): Promise<Moment[]> {
   return backend.list(kstDayRange(kstDate()));
 }
 
-/** 모든 크리에이터의 오늘 Moment 중 최신순 */
-export async function getLatestMoments(limit = 10): Promise<Moment[]> {
-  return backend.list({ ...kstDayRange(kstDate()), order: "desc", limit });
-}
-
-/** 온보딩 소개 화면의 예시 — 실제 데이터가 아닌 고정 샘플 (새벽 · 빈 DB에서도 보이도록) */
-export async function getOnboardingSample(): Promise<Moment[]> {
-  return [...buildPastMoments(), ...buildMockDay(kstDate(), "", Infinity)].filter((m) => m.creatorId === "c1").reverse();
+/** 최근 며칠의 Moment (Studio 통계) */
+export async function getRecentMoments(creatorId: string, days: number): Promise<Moment[]> {
+  const from = new Date(Date.now() - days * 86_400_000).toISOString();
+  return backend.list({ creatorIds: [creatorId], from, order: "desc" });
 }
 
 /* ---------- 쓰기 ---------- */
 
-/** createdAt은 저장하는 순간의 실제 시각 (DB에서는 now()) */
+/** createdAt은 DB now() — 공개하는 순간의 실제 시각 */
 export async function createMoment(input: NewMoment): Promise<Moment> {
   return backend.create(input);
 }
@@ -87,9 +72,18 @@ export async function deleteMoment(id: string): Promise<void> {
   return backend.remove(id);
 }
 
-/** ♡ → ♥︎ : 누르면 +1, 다시 누르면 -1. 눌린 상태가 되면 true */
+/** 반응 토글 (♥ · 응원 · 뭉클 · 웃음). 눌린 상태가 되면 true */
+export async function toggleReaction(momentId: string, kind: ReactionKey): Promise<boolean> {
+  return backend.toggleReaction(momentId, kind);
+}
+
+/** ♡ → ♥︎ */
 export async function toggleLove(momentId: string): Promise<boolean> {
-  return backend.toggleLove(momentId);
+  return backend.toggleReaction(momentId, "love");
+}
+
+export async function getMyReactions(momentId: string): Promise<ReactionKey[]> {
+  return backend.myReactions(momentId);
 }
 
 /* ---------- Daily (지난 하루) ---------- */
@@ -101,7 +95,7 @@ export async function toggleLove(momentId: string): Promise<boolean> {
 function toDaily(creatorId: string, date: string, moments: Moment[], viewer?: FanUser): DailyRecord {
   const visible = moments.filter((m) => (viewer ? canViewMoment(viewer, m) : !m.locked));
   const ranked = [...visible].sort((a, b) => totalReactions(b.reactions) - totalReactions(a.reactions));
-  const cover = ranked.find((m) => (m.type === "photo" || m.type === "video") && m.mediaUrl);
+  const cover = ranked.find((m) => (m.type === "photo" && m.mediaUrl) || (m.type === "video" && m.posterUrl));
   return {
     id: `${creatorId}-${date}`,
     creatorId,
@@ -109,7 +103,7 @@ function toDaily(creatorId: string, date: string, moments: Moment[], viewer?: Fa
     title: ranked[0]?.content || "구독자에게 공개된 하루",
     highlight: ranked[1]?.content ?? "",
     momentCount: moments.length,
-    coverUrl: cover?.mediaUrl,
+    coverUrl: cover?.type === "video" ? cover.posterUrl : cover?.mediaUrl,
     reactionTotal: moments.reduce((sum, m) => sum + totalReactions(m.reactions), 0),
     firstMomentId: moments[0].id,
   };

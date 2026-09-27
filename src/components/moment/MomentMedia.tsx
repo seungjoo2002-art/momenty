@@ -47,8 +47,23 @@ export function MomentMedia({ moment, variant = "card", locked, dark, className 
       return <Photo src={moment.mediaUrl} alt={moment.content} className={cn(ASPECT[variant], RADIUS[variant], className)} />;
 
     case "video":
+      // 상세(full)에서는 실제 재생, 그 밖에는 포스터 + 재생 표시
+      if (variant === "full" && moment.mediaUrl) {
+        return (
+          <div className={cn("relative bg-black", ASPECT.full, className)}>
+            <video
+              src={moment.mediaUrl}
+              poster={moment.posterUrl}
+              controls
+              playsInline
+              preload="metadata"
+              className="absolute inset-0 h-full w-full object-contain"
+            />
+          </div>
+        );
+      }
       return (
-        <Photo src={moment.mediaUrl} alt={moment.content} className={cn(ASPECT[variant], RADIUS[variant], className)}>
+        <Photo src={moment.posterUrl} alt={moment.content} className={cn(ASPECT[variant], RADIUS[variant], className)}>
           <div
             className={cn(
               "absolute grid place-items-center rounded-full bg-black/35 text-white backdrop-blur-sm",
@@ -75,7 +90,7 @@ export function MomentMedia({ moment, variant = "card", locked, dark, className 
       }
       return (
         <div className={className}>
-          <VoicePlayer seed={moment.id} durationSec={moment.durationSec} size={variant === "full" ? "lg" : "md"} tone={dark ? "dark" : "default"} />
+          <VoicePlayer seed={moment.id} src={moment.mediaUrl} durationSec={moment.durationSec} size={variant === "full" ? "lg" : "md"} tone={dark ? "dark" : "default"} />
         </div>
       );
 
@@ -103,7 +118,7 @@ function LockedMedia({ moment, variant, className }: { moment: Moment; variant: 
 
   return (
     <Photo
-      src={isVisual ? moment.mediaUrl : undefined}
+      src={undefined}
       alt=""
       className={cn(aspect, RADIUS[variant] || "rounded-none", className)}
       imgClassName="blur-2xl scale-125"

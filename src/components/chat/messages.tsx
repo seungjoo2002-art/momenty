@@ -4,7 +4,7 @@ import { AIBadge, VerifiedMark } from "@/components/badges";
 import { Avatar } from "@/components/ui/Avatar";
 import type { Creator, Moment } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
-import { formatClock, formatTime } from "@/lib/utils/format";
+import { formatClock, formatTime, shortName } from "@/lib/utils/format";
 
 /**
  * 세 종류의 말풍선은 절대 비슷해 보이지 않는다.
@@ -29,7 +29,7 @@ export function AIMessage({
       <Avatar src={creator.avatarUrl} name={creator.name} size="sm" ring="ai" />
       <div className="min-w-0">
         <div className="mb-1 flex items-center gap-1">
-          <span className="text-meta text-ink-2">{creator.name.slice(1)} AI</span>
+          <span className="text-meta text-ink-2">{shortName(creator.name)} AI</span>
           <AIBadge />
         </div>
         <div className="rounded-[18px] rounded-tl-[6px] bg-surface px-3.5 py-2.5 text-sub text-ink ring-1 ring-line ring-inset">

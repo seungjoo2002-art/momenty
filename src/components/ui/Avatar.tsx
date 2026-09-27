@@ -10,6 +10,15 @@ const SIZES = {
   "2xl": "size-[84px]",
 } as const;
 
+const INITIAL: Record<keyof typeof SIZES, string> = {
+  xs: "text-[10px]",
+  sm: "text-meta",
+  md: "text-sub",
+  lg: "text-name",
+  xl: "text-section",
+  "2xl": "text-title",
+};
+
 interface AvatarProps {
   src?: string;
   name: string;
@@ -35,10 +44,17 @@ export function Avatar({ src, name, size = "md", ring = "none", className }: Ava
   return (
     <div className={cn("h-fit w-fit shrink-0 rounded-full", ringClass, className)}>
       <Photo
-        src={src}
+        src={src || undefined}
         alt={name}
         className={cn("rounded-full", SIZES[size], ring !== "none" && "ring-2 ring-surface")}
-      />
+      >
+        {/* 프로필 사진이 없으면 이름의 첫 글자 */}
+        {!src && (
+          <span aria-hidden className={cn("absolute inset-0 grid place-items-center font-semibold text-brand-deep/70", INITIAL[size])}>
+            {name.trim().charAt(0).toUpperCase()}
+          </span>
+        )}
+      </Photo>
     </div>
   );
 }

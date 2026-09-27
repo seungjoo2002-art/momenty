@@ -1,11 +1,19 @@
-import type { Moment } from "@/lib/types";
+import type { Moment, MomentType, Visibility } from "@/lib/types";
+import type { MomentMediaInput } from "../media";
 
-export type NewMoment = Pick<
-  Moment,
-  "creatorId" | "type" | "content" | "mediaUrl" | "durationSec" | "visibility" | "aiContextEnabled"
->;
+export interface NewMoment {
+  creatorId: string;
+  type: MomentType;
+  content: string;
+  /** 사진 · 영상 · 음성 파일 — 공개하는 순간 Storage에 올린다 */
+  media?: MomentMediaInput;
+  durationSec?: number;
+  visibility: Visibility;
+  aiContextEnabled: boolean;
+}
 
-export type MomentPatch = Partial<Pick<Moment, "content" | "mediaUrl" | "visibility" | "aiContextEnabled">>;
+/** 공개 후 고칠 수 있는 것: 글 · 공개범위 · AI 참고 여부 (미디어 · 시각은 바꾸지 않는다) */
+export type MomentPatch = Partial<Pick<Moment, "content" | "visibility" | "aiContextEnabled">>;
 
 export interface MomentQuery {
   creatorIds?: string[];
@@ -16,19 +24,4 @@ export interface MomentQuery {
   to?: string;
   order?: "asc" | "desc";
   limit?: number;
-}
-
-/**
- * Moment 저장소 구현이 지켜야 하는 최소 기능.
- * services/moments.ts는 이 위에 Today · Daily 같은 도메인 함수를 만든다.
- */
-export interface MomentBackend {
-  list(query: MomentQuery): Promise<Moment[]>;
-  get(id: string): Promise<Moment | undefined>;
-  create(input: NewMoment): Promise<Moment>;
-  update(id: string, patch: MomentPatch): Promise<Moment | undefined>;
-  remove(id: string): Promise<void>;
-  /** ♥ 토글 — 눌린 상태가 되면 true */
-  toggleLove(id: string): Promise<boolean>;
-  subscribe(listener: () => void): () => void;
 }

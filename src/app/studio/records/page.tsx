@@ -1,7 +1,9 @@
-import { getCurrentCreator } from "@/lib/services/studio";
+"use client";
+
+import { useStudioCreator } from "@/components/auth/Gates";
 import { RecordsView } from "./RecordsView";
 
-export default async function RecordsPage() {
-  const creator = await getCurrentCreator();
+export default function RecordsPage() {
+  const creator = useStudioCreator();
   return <RecordsView creatorId={creator.id} />;
 }

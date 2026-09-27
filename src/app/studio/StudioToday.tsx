@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, Loader2, Trash2 } from "lucide-react";
+import { CheckCircle2, Loader2, Pencil, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { VisibilityBadge } from "@/components/badges";
@@ -11,9 +11,10 @@ import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Button } from "@/components/ui/Button";
 import { LoadError } from "@/components/ui/LoadState";
 import { SectionHeader } from "@/components/ui/primitives";
+import { VisibilitySelector } from "@/components/studio/VisibilitySelector";
 import { useMomentData } from "@/lib/hooks/useMomentData";
-import { deleteMoment, getTodayMoments } from "@/lib/services/moments";
-import type { Creator, Moment } from "@/lib/types";
+import { deleteMoment, getTodayMoments, updateMoment } from "@/lib/services/moments";
+import type { Creator, Moment, Visibility } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
 import { formatClock } from "@/lib/utils/format";
 
@@ -45,13 +46,14 @@ export function PostedToast() {
 /** 오늘 남긴 Moment가 있으면 보라 링 */
 export function TodayAvatar({ creator }: { creator: Creator }) {
   const { data: moments } = useToday(creator.id);
-  return <Avatar src={creator.avatarUrl} name={creator.name} size="md" ring={moments?.length ? "today" : "none"} />;
+  return <Avatar src={creator.avatarUrl || undefined} name={creator.name} size="md" ring={moments?.length ? "today" : "none"} />;
 }
 
-/** 오늘의 Timeline — compact. 실제로 남긴 Moment만 시간순으로. 크리에이터 본인은 여기서 지울 수 있다. */
+/** 오늘의 Timeline — compact. 실제로 남긴 Moment만 시간순으로. 크리에이터 본인은 여기서 고치거나 지울 수 있다. */
 export function StudioTimeline({ creatorId }: { creatorId: string }) {
   const { data: moments, error, retry } = useToday(creatorId);
   const [target, setTarget] = useState<Moment | null>(null);
+  const [editing, setEditing] = useState<Moment | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -105,6 +107,14 @@ export function StudioTimeline({ creatorId }: { creatorId: string }) {
                 </Link>
                 <button
                   type="button"
+                  onClick={() => setEditing(m)}
+                  aria-label={`${formatClock(m.createdAt)} Moment 수정`}
+                  className="pressable grid size-9 shrink-0 place-items-center rounded-full text-faint hover:text-muted"
+                >
+                  <Pencil className="size-4" strokeWidth={1.8} />
+                </button>
+                <button
+                  type="button"
                   onClick={() => setTarget(m)}
                   aria-label={`${formatClock(m.createdAt)} Moment 삭제`}
                   className="pressable -mr-2 grid size-9 shrink-0 place-items-center rounded-full text-faint hover:text-muted"
@@ -122,7 +132,7 @@ export function StudioTimeline({ creatorId }: { creatorId: string }) {
       )}
 
       <BottomSheet open={target !== null} onClose={closeSheet} title="이 Moment를 지울까요?">
-        <p className="text-sub text-ink-2">팬의 Today와 기록에서도 사라지고, 되돌릴 수 없어요.</p>
+        <p className="text-sub text-ink-2">팬의 Today와 기록에서도 사라지고, 올린 사진 · 영상 · 음성 파일도 함께 지워져요. 되돌릴 수 없어요.</p>
         {deleteError && <p className="mt-2 text-caption text-danger">{deleteError}</p>}
         <div className="mt-5 flex gap-2">
           <Button variant="secondary" className="flex-1" onClick={closeSheet} disabled={deleting}>
@@ -134,6 +144,60 @@ export function StudioTimeline({ creatorId }: { creatorId: string }) {
           </Button>
         </div>
       </BottomSheet>
+
+      {editing && <EditSheet moment={editing} onClose={() => setEditing(null)} />}
     </section>
+  );
+}
+
+/** 공개 후에는 글 · 공개범위만 고칠 수 있다 (기록한 시각과 미디어는 그대로) */
+function EditSheet({ moment, onClose }: { moment: Moment; onClose: () => void }) {
+  const [content, setContent] = useState(moment.content);
+  const [visibility, setVisibility] = useState<Visibility>(moment.visibility);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const isText = moment.type === "text";
+
+  async function save() {
+    if (isText && !content.trim()) {
+      setError("내용을 입력해 주세요.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const saved = await updateMoment(moment.id, { content: content.trim(), visibility });
+      if (!saved) throw new Error("이미 지워졌거나 고칠 수 없는 Moment예요.");
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "수정하지 못했어요.");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <BottomSheet open onClose={onClose} title={`${formatClock(moment.createdAt)} Moment 고치기`}>
+      <textarea
+        value={content}
+        onChange={(e) => setContent(e.target.value)}
+        maxLength={2000}
+        rows={isText ? 4 : 2}
+        placeholder={isText ? "내용" : "한 줄 남기기 (선택)"}
+        className="w-full resize-none rounded-tile border border-line-strong bg-surface px-4 py-3 text-body outline-none focus:border-brand"
+      />
+      <div className="mt-3">
+        <VisibilitySelector value={visibility} onChange={setVisibility} />
+      </div>
+      {error && <p className="mt-2 text-caption text-danger">{error}</p>}
+      <div className="mt-4 flex gap-2">
+        <Button variant="secondary" className="flex-1" onClick={onClose} disabled={saving}>
+          취소
+        </Button>
+        <Button className="flex-1" onClick={save} disabled={saving}>
+          {saving && <Loader2 className="size-4 animate-spin" />}
+          저장
+        </Button>
+      </div>
+    </BottomSheet>
   );
 }

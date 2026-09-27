@@ -12,7 +12,8 @@ import { cn } from "@/lib/utils/cn";
 import { formatClock } from "@/lib/utils/format";
 
 interface Props {
-  creator: Creator;
+  /** 소개용 예시 크리에이터 */
+  creator: Omit<Creator, "profileId">;
   moments: Moment[];
 }
 
@@ -127,7 +128,10 @@ export function OnboardingCarousel({ creator, moments }: Props) {
         </Link>
       </div>
 
-      <div className="mt-8 h-[340px] shrink-0">{s.visual}</div>
+      <div className="relative mt-8 h-[340px] shrink-0">
+        {s.visual}
+        <span className="absolute -top-5 right-0 text-micro text-faint">예시 화면</span>
+      </div>
 
       <div className="mt-14 flex-1">
         <div className="mb-3 flex items-center gap-2 text-meta font-semibold text-muted">

@@ -1,6 +1,7 @@
 import { ChevronRight, MapPin } from "lucide-react";
 import Link from "next/link";
 import { VisibilityBadge } from "@/components/badges";
+import { FEATURES } from "@/lib/constants";
 import type { Moment } from "@/lib/types";
 import { MomentMedia } from "./MomentMedia";
 import { ReactionButton } from "./ReactionButton";
@@ -81,7 +82,7 @@ export function MomentCard({ moment, locked, mode = "fan", canChat }: MomentCard
       {mode !== "preview" && (
         <div className="mt-1 flex items-center gap-3">
           <ReactionButton moment={moment} readOnly={!linked} />
-          {linked && canChat && (
+          {linked && canChat && FEATURES.creatorAI && (
             <Link href={`/chat/${moment.creatorId}?moment=${moment.id}`} className="py-2 text-meta text-muted hover:text-ink">
               이 순간 이야기하기
             </Link>

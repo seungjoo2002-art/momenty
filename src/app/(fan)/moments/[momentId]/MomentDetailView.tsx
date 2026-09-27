@@ -10,22 +10,25 @@ import { Avatar } from "@/components/ui/Avatar";
 import { ButtonLink } from "@/components/ui/Button";
 import { LoadError } from "@/components/ui/LoadState";
 import { TopBar } from "@/components/ui/TopBar";
+import { FEATURES } from "@/lib/constants";
 import { useMomentData } from "@/lib/hooks/useMomentData";
 import { getCreator } from "@/lib/services/creators";
-import { getCurrentFan } from "@/lib/services/fan";
-import { getMoment, getMomentsOn } from "@/lib/services/moments";
+import { getCurrentFan, getSavedMomentIds } from "@/lib/services/fan";
+import { getMoment, getMomentsOn, getMyReactions } from "@/lib/services/moments";
 import { canChat, canViewMoment, tierFor } from "@/lib/utils/access";
 import { dateKeyOf, formatClock, formatDate, formatTime, isTodayKst } from "@/lib/utils/format";
 
 async function loadDetail(momentId: string) {
   const moment = await getMoment(momentId);
   if (!moment) return null;
-  const [creator, fan, dayMoments] = await Promise.all([
+  const [creator, fan, dayMoments, savedIds, myReactions] = await Promise.all([
     getCreator(moment.creatorId),
     getCurrentFan(),
     getMomentsOn(moment.creatorId, dateKeyOf(moment.createdAt)),
+    getSavedMomentIds(),
+    getMyReactions(moment.id),
   ]);
-  return creator ? { moment, creator, fan, dayMoments } : null;
+  return creator ? { moment, creator, fan, dayMoments, saved: savedIds.includes(moment.id), myReactions } : null;
 }
 
 /** Moment 상세 — 검은 화면에서 미디어를 가장 크게. 저장소의 실제 Moment를 id로 읽는다. */
@@ -60,7 +63,7 @@ export function MomentDetailView({ momentId }: { momentId: string }) {
     );
   }
 
-  const { moment, creator, fan, dayMoments } = data;
+  const { moment, creator, fan, dayMoments, saved, myReactions } = data;
   const tier = tierFor(fan, creator.id);
   const locked = !canViewMoment(fan, moment);
   const today = isTodayKst(moment.createdAt);
@@ -118,7 +121,7 @@ export function MomentDetailView({ momentId }: { momentId: string }) {
           </div>
         ) : (
           <>
-            <MomentActions moment={moment} initialSaved={fan.savedMomentIds.includes(moment.id)} />
+            <MomentActions moment={moment} saved={saved} myReactions={myReactions} />
 
             {moment.type !== "text" && <p className="mt-1 px-1 text-body text-white/90">{moment.content}</p>}
 
@@ -135,7 +138,7 @@ export function MomentDetailView({ momentId }: { momentId: string }) {
               </div>
             )}
 
-            {canChat(tier) && (
+            {FEATURES.creatorAI && canChat(tier) && (
               <Link
                 href={`/chat/${creator.id}?moment=${moment.id}`}
                 className="mt-4 flex items-center justify-between border-t border-white/10 px-1 py-3.5 text-caption text-white/60 hover:text-white"

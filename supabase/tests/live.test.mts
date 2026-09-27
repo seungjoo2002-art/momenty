@@ -9,7 +9,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { deflateSync } from "node:zlib";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js";
 
 process.loadEnvFile(".env.local");
 if (!process.argv.includes("--confirm-dev")) {
@@ -23,8 +23,8 @@ const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const BUCKET = "moment-media";
 const mask = (s: string) => s.replace(/^(.).*(@.*)$/, "$1***$2");
 
-// 앱 코드(services)가 브라우저에서처럼 동작하도록: 세션 · 모드(pathname) 판단
-const location = { pathname: "/today" };
+// 앱 코드(services)가 브라우저에서처럼 로그인 세션을 쓰도록
+const location = { pathname: "/today", href: "http://localhost:3000/today", origin: "http://localhost:3000", hash: "", search: "" };
 Object.assign(globalThis, { window: { location, addEventListener() {}, removeEventListener() {} } });
 
 /* ---------- 결과 기록 ---------- */
@@ -97,8 +97,12 @@ const createdMomentIds: string[] = [];
 const createdFiles: string[] = [];
 let outsiderId: string | null = null;
 
-const creatorEmail = process.env.NEXT_PUBLIC_DEMO_CREATOR_EMAIL!;
-const fanEmail = process.env.NEXT_PUBLIC_DEMO_FAN_EMAIL!;
+// seed가 만든 데모 계정 (서버 · 테스트 전용 DEMO_* — 앱 화면은 이 값을 쓰지 않는다)
+const env = (k: string) => process.env[`DEMO_${k}`] || "";
+const creatorEmail = env("CREATOR_EMAIL");
+const creatorPassword = env("CREATOR_PASSWORD");
+const fanEmail = env("FAN_EMAIL");
+const fanPassword = env("FAN_PASSWORD");
 console.log(`대상: ${new URL(URL_).host.replace(/^[^.]+/, "<ref>")} · creator ${mask(creatorEmail)} · fan ${mask(fanEmail)}`);
 
 // 임시 비구독자 (admin은 계정 생성에만 사용)
@@ -124,7 +128,7 @@ try {
   /* 1 */
   section(1, "Creator 테스트 계정 로그인");
   await step("signInWithPassword 성공", async () => {
-    creator = await signIn(creatorEmail, process.env.NEXT_PUBLIC_DEMO_CREATOR_PASSWORD!);
+    creator = await signIn(creatorEmail, creatorPassword);
     return [true, creator.uid];
   });
   check("JWT role = authenticated (service_role 아님)", creator?.jwtRole === "authenticated", creator?.jwtRole);
@@ -132,7 +136,7 @@ try {
   /* 2 */
   section(2, "Fan 테스트 계정 로그인");
   await step("signInWithPassword 성공", async () => {
-    fan = await signIn(fanEmail, process.env.NEXT_PUBLIC_DEMO_FAN_PASSWORD!);
+    fan = await signIn(fanEmail, fanPassword);
     return true;
   });
   check("JWT role = authenticated", fan?.jwtRole === "authenticated", fan?.jwtRole);
@@ -166,9 +170,9 @@ try {
     if (error) throw error;
     return [data.length === 1 && data[0].id === "c1", data];
   });
-  await step("비로그인도 크리에이터 목록 조회 (8명)", async () => {
+  await step("비로그인도 크리에이터 목록 조회 (seed 8명 이상)", async () => {
     const { count, error } = await anon.from("creators").select("id", { count: "exact", head: true });
-    return [!error && count === 8, error ?? count];
+    return [!error && (count ?? 0) >= 8, error ?? count];
   });
   await step("Fan이 c1 크리에이터 정보 수정 → 0행 (RLS)", async () => {
     const { data, error } = await fan.sb.from("creators").update({ bio: "hacked" }).eq("id", "c1").select("id");
@@ -203,6 +207,13 @@ try {
 
   /* 6 — 앱 서비스 코드 경로 (services/moments.ts → Supabase backend) */
   const svc = await import("../../src/lib/services/moments");
+  const appAuth = await import("../../src/lib/services/auth");
+  /** 앱의 로그인 서비스로 사용자 전환 (브라우저의 로그인 · 로그아웃과 같은 경로) */
+  const loginAs = async (email: string, password: string) => {
+    await appAuth.signOut().catch(() => {});
+    svc.clearSignedUrls();
+    await appAuth.signIn(email, password);
+  };
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date());
   let textId = "";
   let subPhotoId = "";
@@ -210,7 +221,7 @@ try {
   let photoPath = "";
 
   section(6, "Creator가 Moment 생성");
-  location.pathname = "/studio/record/preview";
+  await loginAs(creatorEmail, creatorPassword);
   await step("앱 createMoment: 텍스트 · 전체 공개", async () => {
     const m = await svc.createMoment({ creatorId: "c1", type: "text", content: `[live-test] 공개 텍스트 ${Date.now()}`, visibility: "public", aiContextEnabled: true });
     textId = m.id;
@@ -223,8 +234,8 @@ try {
     return [kst === today && Math.abs(Date.now() - new Date(m!.createdAt).getTime()) < 5 * 60_000, m?.createdAt];
   });
   await step("앱 createMoment: 사진 · 구독자 공개 (Storage 업로드 포함)", async () => {
-    const dataUrl = `data:image/png;base64,${png().toString("base64")}`;
-    const m = await svc.createMoment({ creatorId: "c1", type: "photo", content: "[live-test] 구독자 사진", mediaUrl: dataUrl, visibility: "subscribers", aiContextEnabled: false });
+    const file = new Blob([new Uint8Array(png())], { type: "image/png" });
+    const m = await svc.createMoment({ creatorId: "c1", type: "photo", content: "[live-test] 구독자 사진", media: { file }, visibility: "subscribers", aiContextEnabled: false });
     subPhotoId = m.id;
     createdMomentIds.push(m.id);
     const { data } = await creator.sb.from("moments").select("media_url").eq("id", m.id).single();
@@ -273,7 +284,7 @@ try {
 
   /* 9 */
   section(9, "Fan이 Creator의 Today/Moment 조회");
-  location.pathname = "/today";
+  await loginAs(fanEmail, fanPassword);
   await step("앱 getTodayMoments(c1) — Fan 세션", async () => {
     const list = await svc.getTodayMoments("c1");
     const mine = list.find((m) => m.id === textId);
@@ -470,6 +481,7 @@ try {
     return [data?.length === 1, data?.length];
   });
   await step("Creator: 앱 deleteMoment → DB 행 + Storage 파일 함께 삭제", async () => {
+    await loginAs(creatorEmail, creatorPassword);
     await svc.deleteMoment(subPhotoId);
     const { data: rows } = await creator.sb.from("moments").select("id").eq("id", subPhotoId);
     const { data: files } = await creator.sb.storage.from(BUCKET).list("c1", { search: photoPath.split("/")[1] });
@@ -477,7 +489,6 @@ try {
   });
 } finally {
   /* ---------- 정리 (테스트가 만든 것만) ---------- */
-  location.pathname = "/studio";
   if (creator) {
     for (const id of createdMomentIds) await creator.sb.from("moments").delete().eq("id", id);
     if (createdFiles.length) await creator.sb.storage.from(BUCKET).remove(createdFiles);

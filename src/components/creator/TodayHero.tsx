@@ -8,6 +8,7 @@ import { RelativeTime } from "@/components/ui/RelativeTime";
 import type { Creator, Moment, Tier } from "@/lib/types";
 import { isMomentLocked } from "@/lib/utils/access";
 import { pickTodayPreview } from "./todayPreview";
+import { shortName } from "@/lib/utils/format";
 
 /** Today Home 맨 위: 가장 최근 크리에이터의 오늘을 사진 중심으로 크게 */
 export function TodayHero({ creator, tier, moments }: { creator: Creator; tier: Tier; moments: Moment[] }) {
@@ -30,7 +31,7 @@ export function TodayHero({ creator, tier, moments }: { creator: Creator; tier: 
         <div className="absolute inset-x-4 bottom-4 text-white">
           <div className="flex items-center gap-2">
             <Avatar src={creator.avatarUrl} name={creator.name} size="sm" className="ring-2 ring-white/80" />
-            <span className="text-section font-semibold">{creator.name.slice(1)}의 오늘</span>
+            <span className="text-section font-semibold">{shortName(creator.name)}의 오늘</span>
             {creator.verified && <VerifiedMark className="size-4" />}
           </div>
           <p className="mt-1 text-caption text-white/80">{moments.length}개의 순간이 기록됐어요</p>

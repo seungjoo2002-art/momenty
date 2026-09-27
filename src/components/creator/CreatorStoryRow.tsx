@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Avatar } from "@/components/ui/Avatar";
 import type { Creator } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
+import { shortName } from "@/lib/utils/format";
 
 /** 상단 가로 스크롤: 팔로우·구독 중인 크리에이터. 오늘 새 Moment가 있으면 보라 링. */
 export function CreatorStoryRow({ items }: { items: { creator: Creator; count: number }[] }) {
@@ -16,7 +17,7 @@ export function CreatorStoryRow({ items }: { items: { creator: Creator; count: n
         >
           <Avatar src={creator.avatarUrl} name={creator.name} size="lg" ring={count ? "today" : "seen"} />
           <span className={cn("mt-1.5 w-full truncate text-center text-meta", count ? "text-ink" : "text-muted")}>
-            {creator.name.slice(1)}
+            {shortName(creator.name)}
           </span>
         </Link>
       ))}

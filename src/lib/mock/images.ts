@@ -56,8 +56,8 @@ export const dailyCover = (creatorId: string, index: number) => {
   return picsum(list[index % list.length], 600, 750);
 };
 
-/** 크리에이터 모드에서 "사진 찍기"를 눌렀을 때 쓰는 Mock 사진 */
-export const draftPhoto = (creatorId: string, n: number) => {
+/** seed 전용: 채워 넣는 지난 하루의 사진 */
+export const seedPhoto = (creatorId: string, n: number) => {
   const set = CREATOR_IMAGES[creatorId];
   const pool = [...Object.values(set.moments), ...set.dailies];
   return picsum(pool[n % pool.length], 900, 1125);

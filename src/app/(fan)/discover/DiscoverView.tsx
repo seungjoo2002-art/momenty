@@ -3,6 +3,7 @@
 import { Search } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { useAccount } from "@/components/auth/AuthProvider";
 import { CreatorCard } from "@/components/creator/CreatorCard";
 import { MomentMedia } from "@/components/moment/MomentMedia";
 import { Avatar } from "@/components/ui/Avatar";
@@ -10,6 +11,7 @@ import { RelativeTime } from "@/components/ui/RelativeTime";
 import { Chip, EmptyState, SectionHeader } from "@/components/ui/primitives";
 import { CATEGORY_LABEL } from "@/lib/constants";
 import type { CategoryKey, Creator, Moment } from "@/lib/types";
+import { shortName } from "@/lib/utils/format";
 
 interface Props {
   creators: Creator[];
@@ -20,17 +22,26 @@ interface Props {
 export function DiscoverView({ creators, counts, latest }: Props) {
   const [category, setCategory] = useState<CategoryKey | "all">("all");
   const [query, setQuery] = useState("");
+  const account = useAccount();
+  const interests = useMemo(() => account?.interests ?? [], [account]);
 
   const filtered = useMemo(() => {
-    const q = query.trim();
-    return creators.filter(
+    const q = query.trim().toLowerCase();
+    const list = creators.filter(
       (c) =>
+        c.id !== account?.creator?.id &&
         (category === "all" || c.category === category) &&
-        (!q || c.name.includes(q) || c.job.includes(q) || c.tags.some((t) => t.includes(q))),
+        (!q ||
+          c.name.toLowerCase().includes(q) ||
+          c.handle.includes(q) ||
+          c.job.includes(q) ||
+          c.tags.some((t) => t.includes(q))),
     );
-  }, [creators, category, query]);
+    // 가입할 때 고른 관심 분야의 크리에이터가 먼저
+    return interests.length ? [...list].sort((a, b) => Number(interests.includes(b.category)) - Number(interests.includes(a.category))) : list;
+  }, [creators, category, query, interests, account]);
 
-  const creatorOf = (id: string) => creators.find((c) => c.id === id)!;
+  const creatorOf = (id: string) => creators.find((c) => c.id === id);
 
   return (
     <main className="animate-fade-in">
@@ -41,7 +52,7 @@ export function DiscoverView({ creators, counts, latest }: Props) {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="이름, 직업, 관심사로 찾기"
+            placeholder="이름, 사용자 이름, 관심사로 찾기"
             className="min-w-0 flex-1 bg-transparent text-sub outline-none placeholder:text-faint"
           />
         </label>
@@ -64,13 +75,14 @@ export function DiscoverView({ creators, counts, latest }: Props) {
           <div className="no-scrollbar flex gap-2.5 overflow-x-auto px-5">
             {latest.map((m) => {
               const c = creatorOf(m.creatorId);
+              if (!c) return null;
               return (
                 <Link key={m.id} href={`/moments/${m.id}`} className="pressable relative block w-[132px] shrink-0 overflow-hidden rounded-card">
                   <MomentMedia moment={m} variant="portrait" className="rounded-none" />
                   <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/65 to-transparent px-2.5 pt-8 pb-2.5 text-white">
                     <div className="flex items-center gap-1.5">
                       <Avatar src={c.avatarUrl} name={c.name} size="xs" className="ring-1 ring-white/70" />
-                      <span className="truncate text-meta font-semibold">{c.name.slice(1)}</span>
+                      <span className="truncate text-meta font-semibold">{shortName(c.name)}</span>
                     </div>
                     <span className="mt-0.5 block text-micro text-white/75">
                       <RelativeTime iso={m.createdAt} />
@@ -92,7 +104,11 @@ export function DiscoverView({ creators, counts, latest }: Props) {
             ))}
           </div>
         ) : (
-          <EmptyState icon={<Search className="size-5" />} title="찾는 크리에이터가 없어요" description="다른 키워드로 검색해 보세요." />
+          <EmptyState
+            icon={<Search className="size-5" />}
+            title={creators.length ? "찾는 크리에이터가 없어요" : "아직 크리에이터가 없어요"}
+            description={creators.length ? "다른 키워드로 검색해 보세요." : "첫 크리에이터가 하루를 남기면 이곳에서 만날 수 있어요."}
+          />
         )}
       </section>
     </main>

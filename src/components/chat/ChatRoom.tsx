@@ -9,7 +9,7 @@ import { ButtonLink } from "@/components/ui/Button";
 import { TopBar } from "@/components/ui/TopBar";
 import { generatePersonaReply } from "@/lib/ai/persona";
 import type { ChatMessage, ChatThread, Creator, Moment } from "@/lib/types";
-import { formatClock, formatTime } from "@/lib/utils/format";
+import { formatClock, formatTime, shortName } from "@/lib/utils/format";
 import { AIMessage, CreatorMessage, FanMessage, SystemNotice, TypingIndicator } from "./messages";
 
 interface ChatRoomProps {
@@ -54,7 +54,7 @@ export function ChatRoom({ creator, thread, moments, canChat, focusMoment }: Cha
     ]);
   }
 
-  const givenName = creator.name.slice(1);
+  const givenName = shortName(creator.name);
 
   return (
     <div className="flex min-h-dvh flex-col">

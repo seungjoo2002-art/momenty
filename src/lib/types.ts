@@ -25,8 +25,10 @@ export interface Moment {
   type: MomentType;
   /** 텍스트 본문 또는 캡션 */
   content: string;
-  /** photo / video 썸네일 */
+  /** 사진 · 영상 · 음성 파일 (비공개 Storage는 signed URL) */
   mediaUrl?: string;
+  /** 영상 포스터 이미지 */
+  posterUrl?: string;
   /** video / voice 길이(초) */
   durationSec?: number;
   /** ISO 8601 */
@@ -50,6 +52,8 @@ export type CategoryKey = "photo" | "music" | "dance" | "food" | "art" | "sports
 
 export interface Creator {
   id: string;
+  /** 이 크리에이터 프로필을 가진 사용자 (profiles.id = auth.uid) */
+  profileId: string;
   name: string;
   handle: string;
   job: string;
@@ -62,8 +66,6 @@ export interface Creator {
   pricing: { subscriber: number; premium: number };
   verified: boolean;
   tags: string[];
-  /** 연속으로 Today를 남긴 일수 */
-  streakDays: number;
   personaEnabled: boolean;
 }
 
@@ -98,14 +100,10 @@ export interface FanSubscription {
   renewsAt?: string;
 }
 
+/** 로그인한 사용자의 팬 쪽 관계 (비로그인이면 id = "" · 빈 목록) */
 export interface FanUser {
   id: string;
-  nickname: string;
-  handle: string;
-  avatarUrl: string;
-  joinedAt: string;
   subscriptions: FanSubscription[];
-  savedMomentIds: string[];
 }
 
 /** ai: Creator AI / creator: 실제 크리에이터 본인 / system: 안내 */

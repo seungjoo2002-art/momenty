@@ -108,3 +108,12 @@ export function josa(word: string, withFinal: string, withoutFinal: string): str
 export function formatDuration(sec: number): string {
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
 }
+
+/**
+ * 다정하게 부르는 이름. 한글 세 글자 이름(성 + 이름)이면 이름만, 그 밖에는 그대로.
+ * ("한하린" → "하린", "Mina" → "Mina", "새벽의 필름" → "새벽의 필름")
+ */
+export function shortName(name: string): string {
+  const n = name.trim();
+  return /^[가-힣]{3}$/.test(n) ? n.slice(1) : n;
+}

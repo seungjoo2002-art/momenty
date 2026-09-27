@@ -2,6 +2,7 @@ import Link from "next/link";
 import { VerifiedMark } from "@/components/badges";
 import { Avatar } from "@/components/ui/Avatar";
 import { Photo } from "@/components/ui/Photo";
+import { CATEGORY_LABEL } from "@/lib/constants";
 import type { Creator } from "@/lib/types";
 import { formatCount } from "@/lib/utils/format";
 
@@ -9,7 +10,7 @@ import { formatCount } from "@/lib/utils/format";
 export function CreatorCard({ creator, todayCount = 0 }: { creator: Creator; todayCount?: number }) {
   return (
     <Link href={`/creators/${creator.id}`} className="pressable block overflow-hidden rounded-card">
-      <Photo src={creator.coverUrl} alt={creator.name} className="aspect-[3/4]">
+      <Photo src={creator.coverUrl || undefined} alt={creator.name} className="aspect-[3/4]">
         <div className="absolute inset-x-0 bottom-0 h-3/5 bg-gradient-to-t from-black/70 to-transparent" />
         {todayCount > 0 && (
           <span className="absolute top-2.5 left-2.5 inline-flex items-center gap-1 rounded-full bg-black/30 px-2 py-1 text-micro font-medium text-white backdrop-blur-md">
@@ -23,7 +24,7 @@ export function CreatorCard({ creator, todayCount = 0 }: { creator: Creator; tod
             <span className="truncate text-sub font-semibold">{creator.name}</span>
             {creator.verified && <VerifiedMark className="size-3.5 shrink-0" />}
           </div>
-          <p className="mt-1 truncate text-meta text-white/80">{creator.job}</p>
+          <p className="mt-1 truncate text-meta text-white/80">{creator.job || CATEGORY_LABEL[creator.category]}</p>
           <p className="text-micro text-white/65">팔로워 {formatCount(creator.followers)}</p>
         </div>
       </Photo>

@@ -1,7 +1,8 @@
 import type { Creator } from "@/lib/types";
 import { creatorAvatar, creatorCover } from "./images";
 
-export const creators: Creator[] = [
+/** seed 전용 — profileId는 seed 스크립트가 만든 사용자로 채운다 */
+export const creators: Omit<Creator, "profileId">[] = [
   {
     id: "c1",
     name: "한하린",
@@ -16,7 +17,6 @@ export const creators: Creator[] = [
     pricing: { subscriber: 4_900, premium: 12_900 },
     verified: true,
     tags: ["필름", "산책", "바다"],
-    streakDays: 42,
     personaEnabled: true,
   },
   {
@@ -33,7 +33,6 @@ export const creators: Creator[] = [
     pricing: { subscriber: 3_900, premium: 9_900 },
     verified: true,
     tags: ["작업실", "기타", "EP"],
-    streakDays: 17,
     personaEnabled: true,
   },
   {
@@ -50,7 +49,6 @@ export const creators: Creator[] = [
     pricing: { subscriber: 5_900, premium: 14_900 },
     verified: true,
     tags: ["발레", "리허설", "공연"],
-    streakDays: 63,
     personaEnabled: true,
   },
   {
@@ -67,7 +65,6 @@ export const creators: Creator[] = [
     pricing: { subscriber: 4_900, premium: 11_900 },
     verified: true,
     tags: ["시장", "주방", "오늘의 메뉴"],
-    streakDays: 9,
     personaEnabled: true,
   },
   {
@@ -84,7 +81,6 @@ export const creators: Creator[] = [
     pricing: { subscriber: 3_900, premium: 9_900 },
     verified: false,
     tags: ["드로잉", "고양이", "작업실"],
-    streakDays: 28,
     personaEnabled: true,
   },
   {
@@ -101,7 +97,6 @@ export const creators: Creator[] = [
     pricing: { subscriber: 2_900, premium: 7_900 },
     verified: false,
     tags: ["트레일", "새벽", "훈련일지"],
-    streakDays: 51,
     personaEnabled: false,
   },
   {
@@ -118,7 +113,6 @@ export const creators: Creator[] = [
     pricing: { subscriber: 3_900, premium: 8_900 },
     verified: true,
     tags: ["책방", "에세이", "망원동"],
-    streakDays: 120,
     personaEnabled: true,
   },
   {
@@ -135,7 +129,6 @@ export const creators: Creator[] = [
     pricing: { subscriber: 3_900, premium: 9_900 },
     verified: false,
     tags: ["로스팅", "제주", "핸드드립"],
-    streakDays: 5,
     personaEnabled: true,
   },
 ];
