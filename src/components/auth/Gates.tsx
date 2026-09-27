@@ -1,12 +1,11 @@
 "use client";
 
-import { Lock } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useRef } from "react";
-import { ButtonLink } from "@/components/ui/Button";
 import { LoadError } from "@/components/ui/LoadState";
 import type { Creator } from "@/lib/types";
 import { useAuth } from "./AuthProvider";
+import { NotCreator } from "./NotCreator";
 
 /** 로그인 후 돌아올 주소 (같은 사이트 안의 경로만) */
 export function safeNext(next: string | undefined | null, fallback = ""): string {
@@ -74,24 +73,6 @@ export function CreatorGate({ children }: { children: React.ReactNode }) {
 function CreatorOnly({ children }: { children: React.ReactNode }) {
   const { state } = useAuth();
   const creator = state.status === "signedIn" ? state.account.creator : null;
-  if (!creator) {
-    return (
-      <main className="flex min-h-dvh flex-col items-center justify-center px-8 text-center">
-        <span className="grid size-11 place-items-center rounded-full bg-brand-tint text-brand">
-          <Lock className="size-5" />
-        </span>
-        <p className="mt-3 text-name font-semibold">크리에이터만 들어올 수 있어요</p>
-        <p className="mt-1 text-caption text-muted">크리에이터 프로필을 만들면 나의 하루를 Moment로 남길 수 있어요.</p>
-        <div className="mt-6 w-full space-y-2">
-          <ButtonLink href="/setup/creator" block>
-            크리에이터로 시작하기
-          </ButtonLink>
-          <ButtonLink href="/today" variant="ghost" block>
-            Today로 돌아가기
-          </ButtonLink>
-        </div>
-      </main>
-    );
-  }
+  if (!creator) return <NotCreator />;
   return <StudioContext.Provider value={creator}>{children}</StudioContext.Provider>;
 }

@@ -67,9 +67,10 @@ src/
    │  ├─ fan.ts        팔로우 · Today feed · 보관함
    │  ├─ studio.ts     팔로워 목록 · 통계 (크리에이터 본인)
    │  └─ drafts.ts     작성 중인 Moment (기기 로컬 — 공개하는 순간에만 업로드)
-   ├─ supabase/  클라이언트 — 브라우저: 로그인 세션 1개 / 서버: 공개(anon) (services에서만 import)
+   ├─ supabase/  client.ts(브라우저 쿠키 세션 · 서버 공개 anon) · server.ts(server-only, 요청 쿠키 세션) · proxy.ts(세션 갱신 · 서버 라우트 보호)
    ├─ hooks/     useMomentData — 서비스 호출 + 변경 시 다시 불러오기 + 오류 상태
-   ├─ ai/        Creator AI 인터페이스 (v0.5 — 아직 화면에 연결하지 않음)
+   ├─ ai/        Persona AI 기반 (server-only): config(키) · schema(zod) · policy(권한) · context(Context Builder) · rateLimit · audit
+   │             persona.ts는 v0.4 이전 프로토타입 (화면 미연결)
    └─ utils/     format(KST 시간), access(공개범위 권한), cn
 ```
 
@@ -186,11 +187,40 @@ npm run test:backend   # 서비스가 만드는 요청(KST 범위 · 로그인 �
 npm run test:live -- --confirm-dev   # 실제 Supabase · seed 데모 계정으로 RLS · Storage 권한 회귀 검사
 npm run test:e2e  -- --confirm-dev   # 실제 Supabase에 새 Creator · Fan 가입 → 흐름 · 보안 검사 → 정리
 npm run build && npm run test:ui -- --confirm-dev   # 설치된 Chrome으로 화면 E2E (가입 · 기록 · 팔로우 · 라우트 보호)
+npm run build && npm run test:ai -- --confirm-dev   # 서버 라우트 보호 · /api/ai/chat 인증 · 입력 · 권한 · Context · injection · rate limit
 npm run db:cleanup-media -- --dry-run --confirm-dev # 참조 없는 업로드 파일 찾기 (--dry-run 빼면 삭제)
 ```
 
 test:e2e · test:ui는 Confirm email이 꺼진 프로젝트에서 실행한다 (가입 메일이 나가지 않도록 — 켜져 있으면 스스로 멈춘다).
 service role은 준비 · 정리에만 쓰고, 권한 검사는 전부 테스트 사용자의 JWT로 한다.
+
+## 서버 인증 · AI 기반 (v0.5-1)
+
+```
+브라우저 ─(쿠키 세션)─▶ src/proxy.ts ─▶ 페이지 / Route Handler ─(사용자 JWT)─▶ Supabase (RLS)
+                          │ 세션 갱신 · 비로그인 → /login?next=
+                          └ /studio: studio/layout.tsx(서버)가 creators 행 확인 → 아니면 Studio 대신 안내만 렌더링
+```
+
+- 세션은 `@supabase/ssr` 쿠키에 있다 → 서버도 로그인 사용자를 안다. 서버에서의 신원 확인은 `getUser()`/`getClaims()`(서명 검증)로만 하고 쿠키 값을 그대로 믿지 않는다.
+- service role key는 앱 코드(페이지 · Route Handler) 어디에도 없다. seed · 정리 스크립트 · 테스트 준비에만.
+- 서버 보호 경로: `/today` `/my` `/archive` `/chat` `/subscribe` `/studio` `/setup`. 클라이언트 Gate는 화면 전환용으로 남아 있다.
+
+### POST /api/ai/chat (LLM 미연결)
+
+| 단계 | 내용 | 실패 |
+|---|---|---|
+| 인증 | 쿠키 세션 → `getUser()` · 다른 Origin 요청 거부 | 401 · 403 |
+| 입력 | zod strict: `creatorId` · `message`(1~1000자) · `conversationId?` · `momentId?`, 정의 밖 필드 거부, 본문 16KB | 400 |
+| 권한 | 크리에이터 존재 · Persona 사용 · 본인 채널 아님 · 구독자(subscriber/premium) | 404 · 403 |
+| 횟수 제한 | `RateLimiter` 인터페이스 (user × creator, user 전체, 시간 창). 지금은 프로세스 메모리 구현 | 429 + Retry-After |
+| Context | `createContextBuilder(사용자 세션)` — `moments` + RLS + `ai_context_enabled = true` 만 | — |
+| 응답 | `reply: null`, `meta { author: "ai", persona, generated, provider, model, context { types, momentIds, focusMomentId } }` | — |
+
+- Persona가 볼 수 있는 칸: style · facts · boundaries · **today** · fanMemory · conversation (+ focus). v0.5-1에서는 today만 데이터가 있다.
+- 메시지 내용은 권한 · Context 선택에 쓰이지 않는다 → prompt injection으로 데이터 범위가 넓어지지 않는다.
+- 감사 기록은 요청 id · 크리에이터 id · 결과 · 메시지 길이 · Context 종류/개수만 (본문 · 프롬프트 · 개인정보 없음).
+- AI 키는 `AI_PROVIDER` · `AI_API_KEY` · `AI_MODEL` (서버 환경 변수). `src/lib/ai/*`는 `server-only` — Client Component에서 import하면 빌드가 실패한다.
 
 ## 디자인 시스템
 

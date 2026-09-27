@@ -14,15 +14,19 @@
     "test:live": "tsx supabase/tests/live.test.mts",
     "db:cleanup-media": "tsx supabase/seed/cleanup-media.ts",
     "test:e2e": "tsx supabase/tests/e2e.test.mts",
-    "test:ui": "tsx supabase/tests/ui.e2e.mts"
+    "test:ui": "tsx supabase/tests/ui.e2e.mts",
+    "test:ai": "tsx supabase/tests/ai.test.mts"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.2",
     "clsx": "^2.1.1",
     "lucide-react": "^1.48.0",
     "next": "16.3.6",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "server-only": "^0.0.1",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
