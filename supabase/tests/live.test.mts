@@ -4,12 +4,13 @@
  *   npm run test:live -- --confirm-dev
  *
  * · 모든 검증 요청은 실제 로그인 세션의 JWT(creator / fan / 비구독자)로 보낸다 → RLS가 그대로 적용된다.
- * · service role(admin)은 "준비·정리"에만 쓴다: 임시 비구독자 계정 생성/삭제, 남은 테스트 데이터 정리.
- * · 테스트가 만든 Moment · 반응 · 파일 · 임시 계정은 끝에서 지운다. seed 데이터는 건드리지 않는다.
+ * · service role(admin)은 "준비·정리"에만 쓴다: 1회용 계정 · 채널 · 유료 등급 · 어제 날짜 Moment 준비와 정리.
+ * · seed · 실제 계정을 쓰지 않는다. 이 실행이 만든 계정만 끝에서(실패해도) Storage → 계정 순서로 지운다.
  */
 import { randomBytes } from "node:crypto";
 import { deflateSync } from "node:zlib";
 import { createClient } from "@supabase/supabase-js";
+import { cleanupTestUsers, registerCleanup } from "./support/cleanup.mjs";
 
 process.loadEnvFile(".env.local");
 if (!process.argv.includes("--confirm-dev")) {
@@ -92,32 +93,76 @@ function png(): Buffer {
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(rows)), chunk("IEND", Buffer.alloc(0))]);
 }
 
-/* ---------- 준비 ---------- */
+/* ---------- 준비 — 이 테스트가 만드는 1회용 계정 · 채널만 (seed · 실제 계정을 쓰지 않는다) ----------
+ *   C1  크리에이터 본인 채널 (팬: premium)       — 대부분의 검사 대상
+ *   C3  다른 크리에이터 (팬: subscriber)          — subscriber · premium 접근 경계
+ *   C2  또 다른 크리에이터 (팬: follow)           — 남의 채널 수정 · 무료 팔로우 경계
+ * admin은 준비(계정 · 유료 등급 · 어제 날짜 Moment — 결제 서버 · 과거 데이터 역할)와 정리에만.
+ */
 const createdMomentIds: string[] = [];
 const createdFiles: string[] = [];
-let outsiderId: string | null = null;
+const userIds: string[] = [];
+registerCleanup(admin, userIds);
+const stamp = Date.now().toString(36);
+const FAN_NICK = `라이브팬${stamp.slice(-3)}`;
+const CREATOR_NICK = `라이브크리에이터${stamp.slice(-3)}`;
+const C1 = `lta${stamp}`;
+const C2 = `ltb${stamp}`;
+const C3 = `ltc${stamp}`;
 
-// seed가 만든 데모 계정 (서버 · 테스트 전용 DEMO_* — 앱 화면은 이 값을 쓰지 않는다)
-const env = (k: string) => process.env[`DEMO_${k}`] || "";
-const creatorEmail = env("CREATOR_EMAIL");
-const creatorPassword = env("CREATOR_PASSWORD");
-const fanEmail = env("FAN_EMAIL");
-const fanPassword = env("FAN_PASSWORD");
-console.log(`대상: ${new URL(URL_).host.replace(/^[^.]+/, "<ref>")} · creator ${mask(creatorEmail)} · fan ${mask(fanEmail)}`);
-
-// 임시 비구독자 (admin은 계정 생성에만 사용)
-const outsiderEmail = `rls-outsider-${Date.now()}@seed.momenty.dev`;
-const outsiderPassword = randomBytes(18).toString("base64url");
-{
-  const { data, error } = await admin.auth.admin.createUser({
-    email: outsiderEmail,
-    password: outsiderPassword,
-    email_confirm: true,
-    app_metadata: { momenty_seed: true, momenty_test: true },
-  });
+async function makeUser(tag: string, nickname: string) {
+  const email = `momenty-lt-${tag}-${stamp}@gmail.com`;
+  const password = `Lt-${randomBytes(9).toString("base64url")}1a`;
+  const { data, error } = await admin.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { nickname }, app_metadata: { momenty_test: true } });
   if (error) throw error;
-  outsiderId = data.user.id;
+  userIds.push(data.user.id);
+  return { email, password, id: data.user.id };
 }
+type Acc = Awaited<ReturnType<typeof makeUser>>;
+let creatorAcc!: Acc;
+let fanAcc!: Acc;
+let outsiderAcc!: Acc;
+// 준비가 중간에 실패해도 그때까지 만든 계정은 지우고 끝낸다 (아래 try/finally 밖이므로 여기서 따로)
+try {
+  creatorAcc = await makeUser("creator", CREATOR_NICK);
+  fanAcc = await makeUser("fan", FAN_NICK);
+  const otherA = await makeUser("other2", "다른크리에이터2");
+  const otherB = await makeUser("other3", "다른크리에이터3");
+  outsiderAcc = await makeUser("outsider", "비구독자");
+  const fail = (e: { message: string } | null) => {
+    if (e) throw new Error(`준비 실패: ${e.message}`);
+  };
+  fail((await admin.from("creators").insert([
+    { id: C1, profile_id: creatorAcc.id, name: CREATOR_NICK, handle: `lt1.${stamp}`, category: "photo" },
+    { id: C2, profile_id: otherA.id, name: "다른크리에이터2", handle: `lt2.${stamp}`, category: "music" },
+    { id: C3, profile_id: otherB.id, name: "다른크리에이터3", handle: `lt3.${stamp}`, category: "art" },
+  ])).error);
+  fail((await admin.from("subscriptions").insert([
+    { fan_id: fanAcc.id, creator_id: C1, tier: "premium" },
+    { fan_id: fanAcc.id, creator_id: C3, tier: "subscriber" },
+    { fan_id: fanAcc.id, creator_id: C2, tier: "follow" },
+  ])).error);
+  // 여러 행을 한 번에 넣으면 빠진 컬럼이 기본값이 아니라 null이 되므로, 날짜를 정하는 행은 따로
+  const yesterday = new Date(Date.now() - 86_400_000).toISOString();
+  fail((await admin.from("moments").insert({ creator_id: C1, type: "text", content: "[live-test] 어제 기록", visibility: "public", created_at: yesterday })).error);
+  fail((await admin.from("moments").insert([
+    { creator_id: C3, type: "text", content: "[live-test] C3 구독자 기록", visibility: "subscriber" },
+    { creator_id: C3, type: "text", content: "[live-test] C3 premium 기록", visibility: "premium" },
+    { creator_id: C2, type: "text", content: "[live-test] C2 구독자 기록", visibility: "subscriber" },
+    { creator_id: C2, type: "text", content: "[live-test] C2 공개 기록", visibility: "public" },
+  ])).error);
+} catch (e) {
+  console.error(e instanceof Error ? e.message : e);
+  console.log("정리:", await cleanupTestUsers(admin, userIds));
+  process.exit(1);
+}
+const creatorEmail = creatorAcc.email;
+const creatorPassword = creatorAcc.password;
+const fanEmail = fanAcc.email;
+const fanPassword = fanAcc.password;
+const outsiderEmail = outsiderAcc.email;
+const outsiderPassword = outsiderAcc.password;
+console.log(`대상: ${new URL(URL_).host.replace(/^[^.]+/, "<ref>")} · 1회용 creator ${mask(creatorEmail)} · fan ${mask(fanEmail)} · 채널 ${C1} · ${C2} · ${C3}`);
 
 let creator!: Awaited<ReturnType<typeof signIn>>;
 let fan!: Awaited<ReturnType<typeof signIn>>;
@@ -144,15 +189,15 @@ try {
 
   /* 3 */
   section(3, "profiles 생성 확인");
-  await step("Fan: 본인 profile 조회 (닉네임 새벽산책)", async () => {
-    const { data, error } = await fan.sb.from("profiles").select("id, nickname, handle").eq("id", fan.uid).single();
+  await step("Fan: 본인 profile 조회 (가입 닉네임)", async () => {
+    const { data, error } = await fan.sb.from("profiles").select("id, nickname").eq("id", fan.uid).single();
     if (error) throw error;
-    return [data.nickname === "새벽산책" && data.handle === "dawn.walk", data];
+    return [data.nickname === FAN_NICK, data];
   });
   await step("Creator: 본인 profile 조회", async () => {
-    const { data, error } = await creator.sb.from("profiles").select("nickname, handle").eq("id", creator.uid).single();
+    const { data, error } = await creator.sb.from("profiles").select("nickname").eq("id", creator.uid).single();
     if (error) throw error;
-    return [data.handle === "harin.film", data];
+    return [data.nickname === CREATOR_NICK, data];
   });
   await step("가입 trigger: 임시 계정도 profile 자동 생성", async () => {
     const { data } = await outsider.sb.from("profiles").select("id").eq("id", outsider.uid);
@@ -168,14 +213,14 @@ try {
   await step("Creator 계정 = creators.c1 의 profile_id", async () => {
     const { data, error } = await creator.sb.from("creators").select("id, name").eq("profile_id", creator.uid);
     if (error) throw error;
-    return [data.length === 1 && data[0].id === "c1", data];
+    return [data.length === 1 && data[0].id === C1, data];
   });
-  await step("비로그인도 크리에이터 목록 조회 (seed 8명 이상)", async () => {
-    const { count, error } = await anon.from("creators").select("id", { count: "exact", head: true });
-    return [!error && (count ?? 0) >= 8, error ?? count];
+  await step("비로그인도 크리에이터 목록 조회 (이 테스트의 채널 3개 포함)", async () => {
+    const { data, error } = await anon.from("creators").select("id").in("id", [C1, C2, C3]);
+    return [!error && data.length === 3, error ?? data];
   });
   await step("Fan이 c1 크리에이터 정보 수정 → 0행 (RLS)", async () => {
-    const { data, error } = await fan.sb.from("creators").update({ bio: "hacked" }).eq("id", "c1").select("id");
+    const { data, error } = await fan.sb.from("creators").update({ bio: "hacked" }).eq("id", C1).select("id");
     return [!error && data.length === 0, error ?? data];
   });
 
@@ -185,23 +230,23 @@ try {
     const { data, error } = await fan.sb.from("subscriptions").select("creator_id, tier");
     if (error) throw error;
     const tier = Object.fromEntries(data.map((s) => [s.creator_id, s.tier]));
-    return [data.length === 6 && tier.c1 === "premium" && tier.c3 === "subscriber" && tier.c5 === "follow", tier];
+    return [data.length === 3 && tier[C1] === "premium" && tier[C3] === "subscriber" && tier[C2] === "follow", tier];
   });
   await step("Creator(c1): 자기 채널 구독자만 조회", async () => {
     const { data, error } = await creator.sb.from("subscriptions").select("creator_id, fan_id");
     if (error) throw error;
-    return [data.length >= 1 && data.every((s) => s.creator_id === "c1"), data.map((s) => s.creator_id)];
+    return [data.length >= 1 && data.every((s) => s.creator_id === C1), data.map((s) => s.creator_id)];
   });
   await step("비구독자: 남의 구독 조회 → 0행", async () => {
     const { data, error } = await outsider.sb.from("subscriptions").select("*");
     return [!error && data.length === 0, error ?? data.length];
   });
   await step("Fan이 스스로 premium으로 올리기 → 거부", async () => {
-    const { data, error } = await fan.sb.from("subscriptions").update({ tier: "premium" }).eq("creator_id", "c3").select("tier");
+    const { data, error } = await fan.sb.from("subscriptions").update({ tier: "premium" }).eq("creator_id", C3).select("tier");
     return [!!error || data.length === 0, error ? `${error.code} ${error.message}` : data];
   });
   await step("비구독자가 스스로 구독 생성 → 거부", async () => {
-    const { error } = await outsider.sb.from("subscriptions").insert({ fan_id: outsider.uid, creator_id: "c1", tier: "premium" });
+    const { error } = await outsider.sb.from("subscriptions").insert({ fan_id: outsider.uid, creator_id: C1, tier: "premium" });
     return [!!error, error ? `${error.code} ${error.message}` : "insert 허용됨!"];
   });
 
@@ -223,10 +268,10 @@ try {
   section(6, "Creator가 Moment 생성");
   await loginAs(creatorEmail, creatorPassword);
   await step("앱 createMoment: 텍스트 · 전체 공개", async () => {
-    const m = await svc.createMoment({ creatorId: "c1", type: "text", content: `[live-test] 공개 텍스트 ${Date.now()}`, visibility: "public", aiContextEnabled: true });
+    const m = await svc.createMoment({ creatorId: C1, type: "text", content: `[live-test] 공개 텍스트 ${Date.now()}`, visibility: "public", aiContextEnabled: true });
     textId = m.id;
     createdMomentIds.push(m.id);
-    return [m.creatorId === "c1" && !m.locked, { id: m.id, createdAt: m.createdAt }];
+    return [m.creatorId === C1 && !m.locked, { id: m.id, createdAt: m.createdAt }];
   });
   await step("createdAt = 서버 now() · 오늘(KST)", async () => {
     const m = await svc.getMoment(textId);
@@ -235,16 +280,16 @@ try {
   });
   await step("앱 createMoment: 사진 · 구독자 공개 (Storage 업로드 포함)", async () => {
     const file = new Blob([new Uint8Array(png())], { type: "image/png" });
-    const m = await svc.createMoment({ creatorId: "c1", type: "photo", content: "[live-test] 구독자 사진", media: { file }, visibility: "subscribers", aiContextEnabled: false });
+    const m = await svc.createMoment({ creatorId: C1, type: "photo", content: "[live-test] 구독자 사진", media: { file }, visibility: "subscribers", aiContextEnabled: false });
     subPhotoId = m.id;
     createdMomentIds.push(m.id);
     const { data } = await creator.sb.from("moments").select("media_url").eq("id", m.id).single();
     photoPath = data!.media_url;
     createdFiles.push(photoPath);
-    return [photoPath.startsWith("c1/") && !!m.mediaUrl?.includes("/storage/v1/object/sign/"), { photoPath }];
+    return [photoPath.startsWith(`${C1}/`) &&!!m.mediaUrl?.includes("/storage/v1/object/sign/"), { photoPath }];
   });
   await step("직접 API: Creator JWT로 premium 텍스트 insert", async () => {
-    const { data, error } = await creator.sb.from("moments").insert({ creator_id: "c1", type: "text", content: "[live-test] premium 원문", visibility: "premium" }).select("id").single();
+    const { data, error } = await creator.sb.from("moments").insert({ creator_id: C1, type: "text", content: "[live-test] premium 원문", visibility: "premium" }).select("id").single();
     if (error) throw error;
     premiumTextId = data.id;
     createdMomentIds.push(data.id);
@@ -266,7 +311,7 @@ try {
   section(8, "Creator가 자신의 Moment 삭제");
   let deleteTargetId = "";
   await step("앱 deleteMoment", async () => {
-    const m = await svc.createMoment({ creatorId: "c1", type: "text", content: "[live-test] 지울 Moment", visibility: "public", aiContextEnabled: true });
+    const m = await svc.createMoment({ creatorId: C1, type: "text", content: "[live-test] 지울 Moment", visibility: "public", aiContextEnabled: true });
     deleteTargetId = m.id;
     await svc.deleteMoment(m.id);
     const { data } = await creator.sb.from("moments").select("id").eq("id", m.id);
@@ -286,7 +331,7 @@ try {
   section(9, "Fan이 Creator의 Today/Moment 조회");
   await loginAs(fanEmail, fanPassword);
   await step("앱 getTodayMoments(c1) — Fan 세션", async () => {
-    const list = await svc.getTodayMoments("c1");
+    const list = await svc.getTodayMoments(C1);
     const mine = list.find((m) => m.id === textId);
     const sorted = list.every((m, i) => i === 0 || list[i - 1].createdAt <= m.createdAt);
     return [!!mine && mine.content === "[live-test] 수정된 텍스트" && sorted, { count: list.length, sorted }];
@@ -295,8 +340,8 @@ try {
     const m = await svc.getMoment(textId);
     return [m?.content === "[live-test] 수정된 텍스트" && m.locked === false, m?.content];
   });
-  await step("앱 Archive: 지난 하루 Daily 계산 (seed Moment)", async () => {
-    const d = await svc.getDailyRecords("c1");
+  await step("앱 Archive: 지난 하루 Daily 계산 (어제 Moment)", async () => {
+    const d = await svc.getDailyRecords(C1);
     return [d.length >= 1 && d.every((x) => x.date < today), { days: d.length, latest: d[0]?.date }];
   });
 
@@ -306,8 +351,8 @@ try {
     const { data, error } = await fan.sb.from("moments").select("content, media_url").eq("id", subPhotoId);
     return [!error && data.length === 1 && data[0].content === "[live-test] 구독자 사진", error ?? data];
   });
-  await step("Fan(c3 subscriber): c3 seed 구독자 Moment 원문 조회", async () => {
-    const { data, error } = await fan.sb.from("moment_feed").select("id, viewable, content").eq("creator_id", "c3").eq("visibility", "subscriber").limit(1);
+  await step("Fan(c3 subscriber): c3 구독자 Moment 원문 조회", async () => {
+    const { data, error } = await fan.sb.from("moment_feed").select("id, viewable, content").eq("creator_id", C3).eq("visibility", "subscriber").limit(1);
     if (error) throw error;
     if (!data.length) return [false, "c3에 subscriber Moment 없음"];
     const direct = await fan.sb.from("moments").select("content").eq("id", data[0].id);
@@ -321,17 +366,17 @@ try {
     return [data?.length === 1 && data[0].content === "[live-test] premium 원문", data];
   });
   await step("Fan(c3 subscriber): c3 premium — moments 테이블 직접 → 0행", async () => {
-    const { data: feed } = await fan.sb.from("moment_feed").select("id").eq("creator_id", "c3").eq("visibility", "premium").limit(1);
+    const { data: feed } = await fan.sb.from("moment_feed").select("id").eq("creator_id", C3).eq("visibility", "premium").limit(1);
     if (!feed?.length) return [false, "c3에 premium Moment 없음"];
     const { data, error } = await fan.sb.from("moments").select("content, media_url").eq("id", feed[0].id);
     return [!error && data.length === 0, error ?? data];
   });
   await step("Fan(c3 subscriber): c3 premium — feed는 행만, content/media null", async () => {
-    const { data } = await fan.sb.from("moment_feed").select("viewable, content, media_url, location").eq("creator_id", "c3").eq("visibility", "premium");
+    const { data } = await fan.sb.from("moment_feed").select("viewable, content, media_url, location").eq("creator_id", C3).eq("visibility", "premium");
     return [!!data?.length && data.every((r) => !r.viewable && r.content === null && r.media_url === null && r.location === null), data?.length];
   });
   await step("앱 getMoment: 잠긴 Moment → locked, 본문 없음", async () => {
-    const { data: feed } = await fan.sb.from("moment_feed").select("id").eq("creator_id", "c3").eq("visibility", "premium").limit(1);
+    const { data: feed } = await fan.sb.from("moment_feed").select("id").eq("creator_id", C3).eq("visibility", "premium").limit(1);
     const m = await svc.getMoment(feed![0].id);
     return [m?.locked === true && m.content === "" && !m.mediaUrl, { locked: m?.locked, content: m?.content }];
   });
@@ -386,7 +431,7 @@ try {
       return [!error && data.length === 0, error ?? data];
     });
     await step(`${who}: c1 이름으로 Moment insert → 42501`, async () => {
-      const { error } = await c().sb.from("moments").insert({ creator_id: "c1", type: "text", content: "fake", visibility: "public" });
+      const { error } = await c().sb.from("moments").insert({ creator_id: C1, type: "text", content: "fake", visibility: "public" });
       return [error?.code === "42501", error?.code ?? "허용됨!"];
     });
   }
@@ -395,12 +440,12 @@ try {
     return [data?.content === "[live-test] 수정된 텍스트", data];
   });
   await step("Creator: 다른 크리에이터(c2) Moment 수정 → 0행", async () => {
-    const { data: feed } = await creator.sb.from("moment_feed").select("id").eq("creator_id", "c2").limit(1);
+    const { data: feed } = await creator.sb.from("moment_feed").select("id").eq("creator_id", C2).limit(1);
     const { data, error } = await creator.sb.from("moments").update({ content: "hacked" }).eq("id", feed![0].id).select("id");
     return [!error && data.length === 0, error ?? data];
   });
   await step("Creator: 자기 Moment를 c2로 옮기기 → 거부", async () => {
-    const { data, error } = await creator.sb.from("moments").update({ creator_id: "c2" }).eq("id", textId).select("id");
+    const { data, error } = await creator.sb.from("moments").update({ creator_id: C2 }).eq("id", textId).select("id");
     return [!!error || data.length === 0, error ? error.code : data];
   });
   await step("앱 updateMoment를 Fan 세션으로 흉내 → 권한 없음", async () => {
@@ -432,7 +477,7 @@ try {
     });
   }
   await step("Fan(c5 follow): c5 subscriber Moment 원문 → 0행", async () => {
-    const { data: feed } = await fan.sb.from("moment_feed").select("id, viewable, content").eq("creator_id", "c5").eq("visibility", "subscriber").limit(1);
+    const { data: feed } = await fan.sb.from("moment_feed").select("id, viewable, content").eq("creator_id", C2).eq("visibility", "subscriber").limit(1);
     if (!feed?.length) return [false, "c5에 subscriber Moment 없음"];
     const { data } = await fan.sb.from("moments").select("id").eq("id", feed[0].id);
     return [data?.length === 0 && !feed[0].viewable && feed[0].content === null, { feed: feed[0], direct: data }];
@@ -445,7 +490,7 @@ try {
   /* 15 */
   section(15, "Storage moment-media 업로드/조회 권한");
   await step("Creator: 자기 폴더(c1/) 업로드 성공 (6번에서 확인한 파일 존재)", async () => {
-    const { data, error } = await creator.sb.storage.from(BUCKET).list("c1", { search: photoPath.split("/")[1] });
+    const { data, error } = await creator.sb.storage.from(BUCKET).list(C1, { search: photoPath.split("/")[1] });
     return [!error && data.length === 1, error ?? data.map((f) => f.name)];
   });
   await step("Fan(구독자 이상): signed URL 발급 + 실제 다운로드 200 · PNG", async () => {
@@ -468,7 +513,7 @@ try {
     return [r.status >= 400, r.status];
   });
   await step("Fan: c1 폴더 업로드 → 거부", async () => {
-    const { error } = await fan.sb.storage.from(BUCKET).upload(`c1/live-test-fan-${Date.now()}.png`, png(), { contentType: "image/png" });
+    const { error } = await fan.sb.storage.from(BUCKET).upload(`${C1}/live-test-fan-${Date.now()}.png`, png(), { contentType: "image/png" });
     return [!!error, error?.message ?? "업로드됨!"];
   });
   await step("비구독자: 자기 이름 폴더라도 크리에이터가 아니면 업로드 거부", async () => {
@@ -477,26 +522,20 @@ try {
   });
   await step("Fan: Creator 파일 삭제 → 파일 그대로", async () => {
     await fan.sb.storage.from(BUCKET).remove([photoPath]);
-    const { data } = await creator.sb.storage.from(BUCKET).list("c1", { search: photoPath.split("/")[1] });
+    const { data } = await creator.sb.storage.from(BUCKET).list(C1, { search: photoPath.split("/")[1] });
     return [data?.length === 1, data?.length];
   });
   await step("Creator: 앱 deleteMoment → DB 행 + Storage 파일 함께 삭제", async () => {
     await loginAs(creatorEmail, creatorPassword);
     await svc.deleteMoment(subPhotoId);
     const { data: rows } = await creator.sb.from("moments").select("id").eq("id", subPhotoId);
-    const { data: files } = await creator.sb.storage.from(BUCKET).list("c1", { search: photoPath.split("/")[1] });
+    const { data: files } = await creator.sb.storage.from(BUCKET).list(C1, { search: photoPath.split("/")[1] });
     return [rows?.length === 0 && files?.length === 0, { rows: rows?.length, files: files?.length }];
   });
 } finally {
-  /* ---------- 정리 (테스트가 만든 것만) ---------- */
-  if (creator) {
-    for (const id of createdMomentIds) await creator.sb.from("moments").delete().eq("id", id);
-    if (createdFiles.length) await creator.sb.storage.from(BUCKET).remove(createdFiles);
-  }
-  const { data: leftovers } = await admin.from("moments").select("id").like("content", "[live-test]%");
-  if (leftovers?.length) await admin.from("moments").delete().in("id", leftovers.map((r) => r.id));
-  if (outsiderId) await admin.auth.admin.deleteUser(outsiderId);
-  console.log(`\n정리: 테스트 Moment ${createdMomentIds.length}개 · 파일 ${createdFiles.length}개 · 임시 계정 1명 삭제 (남은 [live-test] 행: ${leftovers?.length ?? 0} → 0)`);
+  /* ---------- 정리 (이 테스트가 만든 계정 · 채널만 — Storage → 계정 → DB cascade) ---------- */
+  const r = await cleanupTestUsers(admin, userIds);
+  console.log(`\n정리: 테스트 Moment ${createdMomentIds.length}개 · 파일 ${r.files}개 · 1회용 계정 ${r.users}명 삭제${r.failed.length ? ` · 실패 ${r.failed.join(", ")}` : ""}`);
 }
 
 /* ---------- 요약 ---------- */

@@ -58,7 +58,7 @@ src/
 │  └─ layout/    AppFrame, BottomNavigation
 └─ lib/
    ├─ types.ts   도메인 타입 (Supabase 스키마 초안)
-   ├─ mock/      seed 데이터 — 화면에서 import 금지 (seed 스크립트 · 온보딩 소개 그림(예시 표시)에서만)
+   ├─ mock/      개발용 seed 데이터 — 앱 코드에서 import 금지 (seed 스크립트 · 로컬 DB 테스트에서만)
    ├─ services/  데이터 접근 레이어 (async) — 화면은 여기만 호출
    │  ├─ auth.ts       가입 · 로그인 · 로그아웃 · 비밀번호 재설정 · 계정 상태
    │  ├─ creators.ts   크리에이터 조회 · 프로필 생성/수정 (프로필 사진 교체 시 예전 파일 삭제)
@@ -97,10 +97,10 @@ src/
 | `NEXT_PUBLIC_SUPABASE_URL` | 프로젝트 URL |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | publishable key (또는 예전 `NEXT_PUBLIC_SUPABASE_ANON_KEY`) |
 | `SUPABASE_SERVICE_ROLE_KEY` | **seed · 정리 스크립트 · 테스트 준비 전용** 서버 키. `NEXT_PUBLIC_` 금지 |
-| `DEMO_FAN_EMAIL` / `_PASSWORD` | seed가 만드는 데모 팬 (test:live가 권한 검사에 사용) |
-| `DEMO_CREATOR_EMAIL` / `_PASSWORD` | seed가 만드는 데모 크리에이터(한하린 · c1) |
+| `DEMO_FAN_EMAIL` / `_PASSWORD` | 개발용 seed(`db:seed`)만 사용 |
+| `DEMO_CREATOR_EMAIL` / `_PASSWORD` | 개발용 seed(`db:seed`)만 사용 |
 
-> 앱 화면은 데모 계정을 쓰지 않는다 (자동 로그인 없음). `NEXT_PUBLIC_`을 붙이지 않은 서버 · 테스트 전용 변수다.
+> 앱 화면 · 테스트는 데모 계정을 쓰지 않는다 (자동 로그인 없음). `NEXT_PUBLIC_`을 붙이지 않은 seed 전용 변수다.
 
 **Supabase Dashboard 설정 (Authentication)**
 
@@ -130,6 +130,9 @@ npx supabase db push          # supabase/migrations 를 순서대로 적용
 5. `supabase/migrations/20260928000000_v05_persona_chat.sql` — v0.5-2: Persona · 사실 · 경계 · AI 대화 · 서버 키 함수 · 공유 rate limit. 적용 후 `insert into private.server_keys (id, key_hash) values ('ai', encode(sha256('<AI_SERVER_KEY>'), 'hex'))` 로 서버 키 해시를 등록한다.
 6. `supabase/migrations/20260928120000_v06_fan_memory.sql` — v0.6: Fan Memory (`fan_ai_settings` · `fan_memories` · 민감정보 판정 · `ai_fan_memory_context` · `record_fan_memories`).
 7. `supabase/migrations/20260929000000_v07_fan_manager_human_chat.sql` — v0.7: Human Chat · 차단 · 신고 · 크리에이터 메모 · 팬 공유 · Fan Manager 함수 · Realtime publication.
+8. `supabase/migrations/20260930000000_v08_safety_privacy.sql` — v0.8: Safe Delay(visible_at) · 운영자(private.admin_users) · 신고 처리 · 보낸 사람 전체 메시지 한도 · 계정 삭제.
+   첫 운영자는 SQL Editor에서만 추가한다 (앱에는 권한을 올리는 기능이 없다):
+   `insert into private.admin_users (user_id) select id from auth.users where email = '<운영자 로그인 이메일>' on conflict do nothing returning user_id;`
 
 ### 3. 개발용 seed (선택)
 
@@ -140,7 +143,7 @@ npm run db:seed -- --confirm-dev           # 여러 번 실행해도 중복되�
 npm run db:seed -- --reset --confirm-dev   # seed로 만든 사용자와 연결된 데이터만 삭제
 ```
 
-seed가 만든 사용자는 `app_metadata.momenty_seed = true`로 표시되고, `--reset`은 그 사용자만 지운다(cascade). 운영 프로젝트에는 실행하지 않는다.
+seed가 만든 사용자는 `app_metadata.momenty_seed = true`로 표시되고, `--reset`은 그 사용자만 지운다(cascade). **로컬 · 개발 프로젝트 전용** — 운영 프로젝트에는 실행하지 않는다. 앱 화면은 seed 데이터에 기대지 않는다 (크리에이터가 0명이면 Discover는 빈 상태를 보여준다).
 
 ### 4. 스키마
 
@@ -187,7 +190,7 @@ auth.users ─1:1─ profiles ─1:0..1─ creators ─1:N─ moments ─1:N─ 
 ```bash
 npm run test:db        # migration을 PGlite(WASM Postgres)에 적용해 RLS · 제약 · seed 데이터 검증
 npm run test:backend   # 서비스가 만드는 요청(KST 범위 · 로그인 토큰 · 업로드 · orphan 정리 · 반응)을 가짜 fetch로 검증
-npm run test:live -- --confirm-dev   # 실제 Supabase · seed 데모 계정으로 RLS · Storage 권한 회귀 검사
+npm run test:live -- --confirm-dev   # 실제 Supabase · 1회용 계정 · 채널로 RLS · Storage 권한 회귀 검사
 npm run test:e2e  -- --confirm-dev   # 실제 Supabase에 새 Creator · Fan 가입 → 흐름 · 보안 검사 → 정리
 npm run build && npm run test:ui -- --confirm-dev   # 설치된 Chrome으로 화면 E2E (가입 · 기록 · 팔로우 · 라우트 보호)
 npm run build && npm run test:ai -- --confirm-dev   # 서버 라우트 보호 · /api/ai/chat 인증 · 입력 · 권한 · Context · injection · rate limit (LLM 없이)
@@ -199,11 +202,19 @@ npm run build && npm run test:llm-memory -- --confirm-dev     # 실제 호출 �
 npm run build && npm run test:core-loop -- --confirm-dev      # 실제 Chrome + Supabase + Anthropic(2회): Moment 작성 → Today → 상세 → AI → Memory → 재로그인 → 삭제
 npm run test:human-live -- --confirm-dev                      # v0.7 실제 프로젝트: Human Chat · 격리 · 위조 · 메모 · 공유 · 차단 · 신고 · Realtime (LLM 없음)
 npm run build && npm run test:human-e2e -- --confirm-dev      # v0.7 Chrome 두 브라우저: Fan Manager → 직접 메시지 실시간 → 공유 · 신고 · 차단 · 구독 종료 (LLM 없음)
+npm run test:safety-live -- --confirm-dev                     # v0.8 실제 프로젝트: Safe Delay 누출(행 · 미디어 · AI · 반응 · Fan Manager) · 운영 권한 · 계정 삭제 (LLM 없음)
+npm run build && npm run test:safety-e2e -- --confirm-dev     # v0.8 Chrome: SafeShare OCR · 가리기 · 공개 예약 · 지금 공개 · 차단 관리 · /admin 404 · 계정 삭제 (LLM 없음)
+npm run build && npm run test:discover-e2e -- --confirm-dev  # v0.8.1 Chrome: 0명 빈 상태 → 크리에이터 등록 → Discover · Today · Safe Delay · 차단/해제 · 계정 삭제 (LLM 없음)
+npm run find:test-leftovers                                   # 읽기 전용: 남은 테스트 형식 계정 · seed 계정 · 주인 없는 Storage 파일 목록 (삭제하지 않음)
 npm run db:cleanup-media -- --dry-run --confirm-dev # 참조 없는 업로드 파일 찾기 (--dry-run 빼면 삭제)
 ```
 
 test:e2e · test:ui는 Confirm email이 꺼진 프로젝트에서 실행한다 (가입 메일이 나가지 않도록 — 켜져 있으면 스스로 멈춘다).
 service role은 준비 · 정리에만 쓰고, 권한 검사는 전부 테스트 사용자의 JWT로 한다.
+
+**테스트 격리** — 실제 프로젝트를 쓰는 테스트는 seed · 실제 계정을 쓰지 않고 매번 1회용 계정(`momenty-<종류>-…@gmail.com`, `app_metadata.momenty_test = true`)을 만든다.
+정리는 `supabase/tests/support/cleanup.mts`의 `cleanupTestUsers()` 한 곳 — 테스트 → `finally` → 그 계정들의 Storage(moment-media 채널 폴더 · avatars) → auth 사용자 순으로, 실패하거나 Ctrl+C로 멈춰도 최대한 정리한다.
+자동 정리는 **그 테스트가 만든 사용자 id만** 대상으로 한다 (이메일 패턴으로 넓게 지우지 않는다). 남은 것이 있으면 `find:test-leftovers`로 확인하고 id를 확인해 직접 지운다.
 
 ## 서버 인증 · AI 기반 (v0.5-1)
 
@@ -269,6 +280,20 @@ AI가 크리에이터를 대신하는 것이 아니라, 필요할 때 실제 크
 | 팬 공유 | My > AI Memory에서 항목마다 [공유] → `fan_creator_shares` 사본. `fan_memories`의 크리에이터 권한은 열지 않는다. 취소 = 삭제 |
 | 차단 · 신고 | 차단은 그 쌍의 직접 메시지와 Creator AI 대화를 모두 멈춘다. 신고는 신고한 사람만 볼 수 있다 (운영 화면은 아직 없음) |
 
+### SafeShare + Safety / Privacy (v0.8) — "Share your day, not your location."
+
+| 항목 | 내용 |
+|---|---|
+| metadata 제거 | 항상. 사진: canvas 재인코딩 + JPEG APP 세그먼트 제거 · 영상/음성: MP4 · MOV · M4A의 udta/meta/XMP 박스를 같은 크기 free로 · MP3 ID3 제거. 확인 못 하는 형식은 "확인하지 못함"으로 안내 (`src/lib/safeshare/metadata.ts`). 업로드 경로 · 본문에 원래 파일 이름 없음 |
+| 사진 확인 | 공개 전 기기 안 OCR(Tesseract.js, 한국어 · 영어, 긴 변 1280px) + QR/바코드(지원 기기) → 패턴(`detectors.ts`)으로 위험 종류 · 위치만 남기고 글자는 버린다. 사진 · 글자는 외부로 보내지 않고 저장 · 로그하지 않는다. LOW/MEDIUM/HIGH만 (점수 없음). LOW는 "안전"이 아니라 "뚜렷한 위험요소를 찾지 못했어요", 실패 · 시간 초과는 "확인하지 못했어요" |
+| 가리기 | 찾은 곳을 되돌릴 수 없는 모자이크로 → 편집본만 업로드 (원본은 기기에만) |
+| OCR 파일 | `scripts/copy-ocr-assets.mjs`가 predev · prebuild에서 `public/ocr/`로 복사 (git 제외). worker · LSTM 코어 3종(기기에 맞는 하나만 받음) · kor/eng best_int — 외부 CDN 없음 |
+| Safe Delay | Studio 설정: 끄기 · 정한 시간(15/30/60/120분) · 매번 다르게(0.5~1.5배). 공개 시각은 DB가 저장 순간 계산 — 앱이 쓸 수 없다. 공개 전에는 팬 · AI · 반응 · 보관함 · Storage signed URL · Fan Manager 어디에도 없음. "지금 공개"로 앞당기기만 가능. 팬에게는 값 대신 프로필 안내 문구만 |
+| 운영 | `/admin/reports` — 서버 layout이 `is_admin()`(private.admin_users) 확인, 아니면 404. 데이터 함수도 DB가 다시 확인 |
+| 메시지 한도 | private.human_chat_settings — 크리에이터 60/10분 · 400/일 · 먼저 연락 30명/일, 팬 40/10분 (보낸 사람 전체 기준) |
+| 계정 | My > 개인정보 및 안전: AI Memory · 차단한 계정 · SafeShare 안내 · 계정 삭제(확인 문구 + 비밀번호 → 본인 Storage 파일 삭제 → `delete_my_account()`) · 로그인 next open redirect 방지 |
+| 차단한 크리에이터 (v0.8.1) | 내가 차단한 크리에이터는 Discover(목록 · 방금 기록된 순간) · Today · 보관함 · 새 대화 시작 목록에서 숨긴다 (`getMyBlockedUserIds()` — RLS상 내 차단만 보인다). 기존 대화 기록 · 차단 해제 · Persona AI 차단 규칙은 그대로 |
+
 AI 키는 `AI_PROVIDER=anthropic` · `AI_API_KEY` · `AI_MODEL` (서버 환경 변수). `src/lib/ai/*`는 `server-only` — Client Component에서 import하면 빌드가 실패한다.
 
 ## 디자인 시스템
@@ -281,8 +306,9 @@ AI 키는 `AI_PROVIDER=anthropic` · `AI_API_KEY` · `AI_MODEL` (서버 환경 �
 | Type | `text-title` 24 · `text-section` 18 · `text-name` 16 · `text-body` 15 · `text-sub` 14 · `text-caption` 13 · `text-meta` 12 · `text-micro` 11 |
 | Radius | `rounded-card` 20 · `rounded-tile` 14 |
 | Motion | `pressable`(누름 scale) · `animate-fade-in` · `animate-open` · `animate-sheet-up` (150~240ms) |
+| Font | Pretendard Variable — npm `pretendard`의 dynamic subset CSS를 `layout.tsx`에서 import. Next가 woff2 조각을 앱 정적 파일(`/_next/static/media`)로 배포하고 브라우저는 쓰인 글자 범위만 받는다. 외부 폰트 요청 없음. SIL OFL 1.1 전문: `public/licenses/pretendard-OFL-1.1.txt` |
 
-Mock 이미지는 `src/lib/mock/images.ts` 한 곳에서 크리에이터 단위로 관리한다. 크리에이터가 올린 사진은 Supabase Storage(`moment-media`)에 저장된다.
+크리에이터가 올린 사진은 Supabase Storage(`moment-media`)에 저장된다. 온보딩 소개 화면은 실제 크리에이터 · Moment로 오해될 이름 · 사진 · 숫자 없이 일반 그림으로만 설명한다.
 
 ## 설계 원칙
 

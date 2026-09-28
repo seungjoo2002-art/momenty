@@ -10,6 +10,8 @@ import { Avatar } from "@/components/ui/Avatar";
 import { RelativeTime } from "@/components/ui/RelativeTime";
 import { Chip, EmptyState, SectionHeader } from "@/components/ui/primitives";
 import { CATEGORY_LABEL } from "@/lib/constants";
+import { useMomentData } from "@/lib/hooks/useMomentData";
+import { getMyBlockedUserIds } from "@/lib/services/safety";
 import type { CategoryKey, Creator, Moment } from "@/lib/types";
 import { shortName } from "@/lib/utils/format";
 
@@ -19,10 +21,17 @@ interface Props {
   latest: Moment[];
 }
 
-export function DiscoverView({ creators, counts, latest }: Props) {
+export function DiscoverView({ creators: allCreators, counts, latest: allLatest }: Props) {
   const [category, setCategory] = useState<CategoryKey | "all">("all");
   const [query, setQuery] = useState("");
   const account = useAccount();
+  // 내가 차단한 크리에이터는 목록 · 최근 Moment에서 숨긴다 (목록은 공개 데이터 — 차단은 로그인한 내 것만 알 수 있다)
+  const { data: blocked } = useMomentData(`blocked:${account?.userId ?? ""}`, getMyBlockedUserIds);
+  const creators = useMemo(() => allCreators.filter((c) => !blocked?.has(c.profileId)), [allCreators, blocked]);
+  const latest = useMemo(() => {
+    const visible = new Set(creators.map((c) => c.id));
+    return allLatest.filter((m) => visible.has(m.creatorId));
+  }, [allLatest, creators]);
   const interests = useMemo(() => account?.interests ?? [], [account]);
 
   const filtered = useMemo(() => {
@@ -96,7 +105,11 @@ export function DiscoverView({ creators, counts, latest }: Props) {
       )}
 
       <section className="mt-7">
-        <SectionHeader title={category === "all" ? "추천 크리에이터" : `${CATEGORY_LABEL[category]} 크리에이터`} />
+        {/* 추천 알고리즘이 아니다: 등록된 크리에이터 전체 (고른 관심 분야가 먼저) */}
+        <SectionHeader
+          title={category === "all" ? "크리에이터" : `${CATEGORY_LABEL[category]} 크리에이터`}
+          caption={category === "all" && interests.length ? "관심 분야를 먼저 보여드려요" : undefined}
+        />
         {filtered.length ? (
           <div className="grid grid-cols-2 gap-2.5 px-5">
             {filtered.map((c) => (

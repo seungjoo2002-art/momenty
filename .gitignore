@@ -41,3 +41,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 /.tmp
+
+# SafeShare OCR 파일 (scripts/copy-ocr-assets.mjs가 predev/prebuild에서 복사)
+/public/ocr
+

@@ -27,6 +27,10 @@ export interface DraftMedia {
   poster?: Blob | null;
   posterUrl?: string;
   durationSec?: number;
+  /** 이 앱에서 녹음한 음성 */
+  recordedInApp?: boolean;
+  /** SafeShare에서 가린 사진 (원본 대신 이 파일을 올린다) */
+  safeShareEdited?: boolean;
 }
 
 const key = (creatorId: string) => `momenty:draft:v2:${creatorId}`;

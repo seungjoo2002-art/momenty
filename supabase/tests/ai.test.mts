@@ -12,6 +12,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServerClient } from "@supabase/ssr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { cleanupTestUsers, registerCleanup } from "./support/cleanup.mjs";
 
 process.loadEnvFile(".env.local");
 if (!process.argv.includes("--confirm-dev")) {
@@ -85,6 +86,7 @@ function stopServer() {
 /* ---------- 계정 · 세션 ---------- */
 const stamp = Date.now().toString(36);
 const userIds: string[] = [];
+registerCleanup(admin, userIds);
 
 interface TestUser {
   email: string;
@@ -436,7 +438,7 @@ try {
   console.log(`   ✗ ${e instanceof Error ? e.message : e}`);
 } finally {
   stopServer();
-  for (const uid of userIds) await admin.auth.admin.deleteUser(uid); // creators · moments · subscriptions cascade (파일 없음)
+  await cleanupTestUsers(admin, userIds); // Storage → 계정 → creators · moments · subscriptions cascade
   const { data: left } = await admin.from("moments").select("id").like("content", "[ai-test]%");
   if (left?.length) await admin.from("moments").delete().in("id", left.map((r) => r.id));
   console.log(`\n정리: 테스트 계정 ${userIds.length}명 삭제 (남은 [ai-test] Moment: ${left?.length ?? 0} → 0)`);

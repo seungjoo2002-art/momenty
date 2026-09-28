@@ -13,6 +13,7 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createServerClient } from "@supabase/ssr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { cleanupTestUsers, registerCleanup } from "./support/cleanup.mjs";
 
 process.loadEnvFile(".env.local");
 if (!process.argv.includes("--confirm-dev")) {
@@ -57,6 +58,7 @@ const stopServer = () => server?.pid && spawn("taskkill", ["/pid", String(server
 
 const stamp = Date.now().toString(36);
 const userIds: string[] = [];
+registerCleanup(admin, userIds);
 interface U {
   uid: string;
   sb: SupabaseClient;
@@ -241,7 +243,7 @@ try {
   stopServer();
   mkdirSync(".tmp", { recursive: true });
   writeFileSync(".tmp/llm-replies.json", JSON.stringify(transcript, null, 2));
-  for (const uid of userIds) await admin.auth.admin.deleteUser(uid);
+  await cleanupTestUsers(admin, userIds);
   console.log(`\n정리: 테스트 계정 ${userIds.length}명 삭제 · 모델 호출 ${calls}회 · 답 원문 .tmp/llm-replies.json`);
 }
 

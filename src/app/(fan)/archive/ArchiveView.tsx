@@ -11,12 +11,13 @@ import { getCreators } from "@/lib/services/creators";
 import { getCurrentFan, getSavedMoments } from "@/lib/services/fan";
 import { useMomentData } from "@/lib/hooks/useMomentData";
 import { getDailyRecordsFor } from "@/lib/services/moments";
+import { getMyBlockedUserIds } from "@/lib/services/safety";
 import { canViewMoment } from "@/lib/utils/access";
 import { formatDate, shortName } from "@/lib/utils/format";
 
 async function loadArchive() {
   const fan = await getCurrentFan();
-  const [creators, saved, dailies] = await Promise.all([
+  const [creators, savedAll, dailiesAll, blockedUsers] = await Promise.all([
     getCreators(),
     getSavedMoments(),
     // 지난 날짜의 Moment를 날짜 · 크리에이터별로 묶은 Daily (팬이 볼 수 있는 것만 제목·커버로)
@@ -24,8 +25,11 @@ async function loadArchive() {
       fan.subscriptions.map((s) => s.creatorId),
       fan,
     ),
+    getMyBlockedUserIds(),
   ]);
-  return { fan, creators, saved, dailies };
+  // 내가 차단한 크리에이터의 지난 하루 · 보관한 Moment는 보이지 않게
+  const blocked = new Set(creators.filter((c) => blockedUsers.has(c.profileId)).map((c) => c.id));
+  return { fan, creators, saved: savedAll.filter((m) => !blocked.has(m.creatorId)), dailies: dailiesAll.filter((d) => !blocked.has(d.creatorId)) };
 }
 
 export function ArchiveView() {

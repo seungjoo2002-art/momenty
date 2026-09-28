@@ -11,7 +11,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { supabaseConfig } from "./client";
 
 /** 로그인해야 볼 수 있는 경로 (클라이언트 Gate와 같은 목록 — 여기가 서버 쪽 보호) */
-export const PRIVATE_PATHS = /^\/(today|my|archive|chat|subscribe|studio|setup)(\/|$)/;
+export const PRIVATE_PATHS = /^\/(today|my|archive|chat|subscribe|studio|setup|admin)(\/|$)/;
 
 export async function updateSession(request: NextRequest): Promise<NextResponse> {
   const { url, key } = supabaseConfig();

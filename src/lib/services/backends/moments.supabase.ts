@@ -16,7 +16,7 @@ import { MOMENT_BUCKET, removeFiles, uploadMomentMedia } from "../media";
 import type { MomentPatch, MomentQuery, NewMoment } from "./types";
 
 const FEED_COLUMNS =
-  "id, creator_id, type, visibility, duration_sec, created_at, viewable, content, media_url, poster_url, location, safe_share, ai_context_enabled, love_count, cheer_count, touched_count, smile_count, liked_by_me";
+  "id, creator_id, type, visibility, duration_sec, created_at, viewable, content, media_url, poster_url, location, safe_share, ai_context_enabled, love_count, cheer_count, touched_count, smile_count, liked_by_me, visible_at";
 
 type DbVisibility = "public" | "subscriber" | "premium";
 
@@ -39,6 +39,8 @@ interface FeedRow {
   touched_count: number;
   smile_count: number;
   liked_by_me: boolean;
+  /** 크리에이터 본인에게만 값이 온다 (팬은 null) */
+  visible_at: string | null;
 }
 
 /* 앱의 "subscribers" ↔ DB의 "subscriber" */
@@ -111,6 +113,7 @@ function toMoment(r: FeedRow, urls: Map<string, string>): Moment {
     aiContextEnabled: r.ai_context_enabled,
     locked: !r.viewable,
     likedByMe: r.liked_by_me,
+    visibleAt: r.visible_at ? new Date(r.visible_at).toISOString() : undefined,
   };
 }
 

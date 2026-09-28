@@ -6,10 +6,12 @@
  *                 읽기는 볼 수 있는 Moment에 연결된 파일만 (signed URL)
  *
  * 형식 · 크기는 여기서 먼저 확인하고, bucket 설정(allowed_mime_types · file_size_limit)이 한 번 더 막는다.
- * 파일 이름은 uuid — 같은 이름으로 덮어쓰지 않는다 (upsert: false).
+ * 파일 이름은 uuid — 같은 이름으로 덮어쓰지 않는다 (upsert: false). 원래 파일 이름은 경로에도, 업로드 본문에도 들어가지 않는다.
+ * metadata(위치 · 기기)는 크리에이터 선택과 관계없이 지운다 — lib/safeshare/metadata.ts.
  */
 import { supabase } from "@/lib/supabase/client";
 import type { MomentType } from "@/lib/types";
+import { sanitizeMediaBlob } from "@/lib/safeshare/metadata";
 import { resizeImage } from "@/lib/utils/image";
 import { ServiceError, toServiceError } from "./errors";
 
@@ -76,7 +78,8 @@ function prepareImage(file: Blob, maxSide: number): Promise<Blob> {
   return typeof document === "undefined" ? Promise.resolve(file) : resizeImage(file, maxSide, 0.85);
 }
 
-function newPath(folder: string, type: string) {
+/** Storage 경로: {폴더}/{uuid}.{확장자} — 원래 파일 이름은 쓰지 않는다 */
+export function newPath(folder: string, type: string) {
   const id = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   return `${folder}/${id}.${EXT[type] ?? "bin"}`;
 }
@@ -84,7 +87,9 @@ function newPath(folder: string, type: string) {
 async function upload(bucket: string, folder: string, blob: Blob): Promise<string> {
   const type = normalizeMime(blob.type);
   const path = newPath(folder, type);
-  const { error } = await supabase().storage.from(bucket).upload(path, blob, { contentType: type, upsert: false, cacheControl: "3600" });
+  // File이면 이름이 업로드 본문(multipart)에 따라갈 수 있다 → 이름 없는 Blob으로 다시 싼다
+  const body = typeof File !== "undefined" && blob instanceof File ? new Blob([blob], { type }) : blob;
+  const { error } = await supabase().storage.from(bucket).upload(path, body, { contentType: type, upsert: false, cacheControl: "3600" });
   if (error) throw error;
   return path;
 }
@@ -129,6 +134,8 @@ export interface MomentMediaInput {
   file: Blob;
   /** 영상 첫 장면 (없어도 된다) */
   poster?: Blob | null;
+  /** 이 앱에서 녹음한 음성 (위치 metadata가 없다) */
+  recordedInApp?: boolean;
 }
 
 /** Moment 유형별로 받을 수 있는 파일인지 */
@@ -145,7 +152,9 @@ export async function uploadMomentMedia(creatorId: string, type: MomentType, inp
   if (invalid) throw new ServiceError(invalid, "invalid");
   const uploaded: string[] = [];
   try {
-    const body = type === "photo" ? await prepareImage(input.file, 1600) : input.file;
+    const resized = type === "photo" ? await prepareImage(input.file, 1600) : input.file;
+    // 위치 · 기기 metadata 제거 (사진: JPEG 세그먼트 · 영상/음성: MP4·MOV·M4A metadata 박스 · MP3 ID3)
+    const { blob: body } = await sanitizeMediaBlob(resized, type === "photo" ? "image" : type === "video" ? "video" : "audio", { recordedInApp: input.recordedInApp });
     const media = await upload(MOMENT_BUCKET, creatorId, body);
     uploaded.push(media);
     let poster: string | null = null;

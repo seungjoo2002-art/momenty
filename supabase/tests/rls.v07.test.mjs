@@ -374,7 +374,9 @@ console.log("\nS — 구독 종료 · 계정 삭제");
       (select count(*)::int from public.message_reports where reporter_id = $1) as own_reports,
       (select count(*)::int from public.message_reports) as reports`, [U.fan1])).rows[0];
   check("S. 팬 계정 삭제 → 대화 · 메시지 · 메모 · 공유 · 차단 · 본인 신고 모두 삭제", left.conv === 0 && left.notes === 0 && left.shares === 0 && left.blocks === 0 && left.own_reports === 0, left);
-  check("S. 그 팬에 대한 다른 사람의 신고는 운영 검토용으로 남음 (메시지 링크만 끊김)", left.reports === reportsBefore - 1, { before: reportsBefore, after: left.reports });
+  // v0.8: 신고는 지우지 않는다 — 삭제한 사람이 한 신고는 신고자 익명(null)으로, 그 사람에 대한 신고는 연결만 끊긴 채 남는다
+  const anon = Number((await db.query(`select count(*)::int as n from public.message_reports where reporter_id is null`)).rows[0].n);
+  check("S. 신고는 운영 검토용으로 남음 (v0.8: 삭제한 사람의 신고는 신고자 익명화)", left.reports === reportsBefore && anon >= 1, { before: reportsBefore, after: left.reports, anon });
   await db.query(`delete from auth.users where id = $1`, [U.creatorB]);
   check("S. 크리에이터 계정 삭제 → 그 채널의 Human 대화 · 메모 · 공유 삭제",
     Number((await db.query(`select count(*)::int as n from public.human_conversations where creator_id = 'c2'`)).rows[0].n) === 0);

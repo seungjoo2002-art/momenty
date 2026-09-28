@@ -1,27 +1,39 @@
 "use client";
 
+import { Camera, Mic, PenLine, Video } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { AIBadge, HumanBadge } from "@/components/badges";
-import { MomentMedia } from "@/components/moment/MomentMedia";
-import { Avatar } from "@/components/ui/Avatar";
 import { Button, ButtonLink } from "@/components/ui/Button";
-import { Photo } from "@/components/ui/Photo";
-import type { Creator, Moment } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
-import { formatClock } from "@/lib/utils/format";
 
-interface Props {
-  /** 소개용 예시 크리에이터 */
-  creator: Omit<Creator, "profileId">;
-  moments: Moment[];
+/**
+ * 가입 전 소개. 그림은 추상적인 예시뿐이다 — 실제(또는 실제처럼 보이는) 크리에이터 이름 · 사진 · 숫자 · Moment 내용을 쓰지 않는다.
+ * 글자 대신 회색 줄(skeleton)과 역할 이름("크리에이터", "크리에이터 AI")만.
+ */
+function Lines({ widths, className }: { widths: string[]; className?: string }) {
+  return (
+    <div className={cn("space-y-1.5", className)} aria-hidden>
+      {widths.map((w, i) => (
+        <span key={i} className="block h-2 rounded-full bg-line-strong/70" style={{ width: w }} />
+      ))}
+    </div>
+  );
 }
 
-export function OnboardingCarousel({ creator, moments }: Props) {
+function Dot({ className }: { className?: string }) {
+  return <span aria-hidden className={cn("grid size-8 shrink-0 place-items-center rounded-full bg-brand-soft text-micro font-semibold text-brand-deep", className)} />;
+}
+
+const TYPES = [
+  { icon: Camera, label: "사진" },
+  { icon: Video, label: "영상" },
+  { icon: Mic, label: "음성" },
+  { icon: PenLine, label: "글" },
+];
+
+export function OnboardingCarousel() {
   const [step, setStep] = useState(0);
-  const photoMoment = moments.find((m) => m.type === "photo")!;
-  const voiceMoment = moments.find((m) => m.type === "voice")!;
-  const textMoment = moments.find((m) => m.type === "text")!;
 
   const slides = [
     {
@@ -29,16 +41,18 @@ export function OnboardingCarousel({ creator, moments }: Props) {
       title: "원하는 순간,\n자유롭게 남긴 기록",
       body: "정해진 시간도, 정해진 횟수도 없어요. 크리에이터가 남기고 싶은 순간에 사진, 영상, 음성, 글로 기록해요.",
       visual: (
-        <div className="relative h-full">
-          <div className="absolute top-2 left-4 w-[58%] -rotate-3">
-            <MomentMedia moment={photoMoment} variant="full" className="shadow-card" />
-          </div>
-          <div className="absolute top-28 right-3 w-[56%] rotate-2 rounded-card bg-surface p-2">
-            <MomentMedia moment={voiceMoment} variant="card" />
-          </div>
-          <div className="absolute right-10 bottom-2 left-8 rounded-card bg-surface p-4">
-            <p className="text-sub leading-relaxed font-medium">{textMoment.content}</p>
-          </div>
+        <div className="grid h-full grid-cols-2 gap-3 px-4">
+          {TYPES.map(({ icon: Icon, label }, i) => (
+            <div key={label} className={cn("flex flex-col justify-between rounded-card bg-surface p-4 ring-1 ring-line ring-inset", i % 2 ? "translate-y-4" : "-translate-y-1")}>
+              <span className="grid size-10 place-items-center rounded-full bg-brand-tint text-brand">
+                <Icon className="size-5" />
+              </span>
+              <div>
+                <p className="text-caption font-semibold text-ink-2">{label}</p>
+                <Lines widths={["80%", "55%"]} className="mt-2" />
+              </div>
+            </div>
+          ))}
         </div>
       ),
     },
@@ -49,20 +63,19 @@ export function OnboardingCarousel({ creator, moments }: Props) {
       visual: (
         <div className="mx-auto w-[88%] rounded-card border border-line bg-surface p-4">
           <div className="mb-4 flex items-center gap-2.5">
-            <Avatar src={creator.avatarUrl} name={creator.name} size="sm" ring="today" />
-            <div className="text-caption">
-              <b>{creator.name}</b>의 Today · <span className="text-brand">{moments.length} Moments</span>
-            </div>
+            <Dot />
+            <p className="text-caption">
+              <b>크리에이터</b>의 Today
+            </p>
           </div>
           <ol>
-            {moments.slice(0, 5).map((m, i) => (
-              <li key={m.id} className="grid grid-cols-[40px_16px_1fr] gap-x-2 pb-3.5">
-                <span className="text-right text-micro font-semibold text-muted tabular-nums">{formatClock(m.createdAt)}</span>
+            {["70%", "50%", "82%", "60%"].map((w, i) => (
+              <li key={i} className="grid grid-cols-[16px_1fr] gap-x-3 pb-4">
                 <span className="relative flex justify-center">
-                  {i < 4 && <span className="absolute top-2 -bottom-3.5 left-1/2 w-[2px] -translate-x-1/2 bg-brand-tint" />}
+                  {i < 3 && <span className="absolute top-2 -bottom-4 left-1/2 w-[2px] -translate-x-1/2 bg-brand-tint" />}
                   <span className="relative mt-0.5 size-3 rounded-full border-[3px] border-brand bg-surface" />
                 </span>
-                <span className="truncate text-caption text-ink-2">{m.content}</span>
+                <Lines widths={[w, "35%"]} />
               </li>
             ))}
           </ol>
@@ -72,22 +85,25 @@ export function OnboardingCarousel({ creator, moments }: Props) {
     {
       kicker: "Persona",
       title: "오늘의 기록으로\n대화하는 Creator AI",
-      body: "Creator AI는 크리에이터가 오늘 실제로 남긴 Moment만을 바탕으로 이야기해요. AI의 답변에는 언제나 AI 표시가 붙어요.",
+      body: "Creator AI는 크리에이터가 실제로 남긴 Moment만을 바탕으로 이야기해요. AI의 답변에는 언제나 AI 표시가 붙어요.",
       visual: (
         <div className="mx-auto w-[88%] space-y-3">
-          <div className="ml-auto w-fit rounded-[20px] rounded-tr-md bg-ink px-4 py-2.5 text-sub text-white">
-            오늘 한강 사진 어떻게 찍은 거예요?
+          <div className="ml-auto w-[62%] rounded-[20px] rounded-tr-md bg-ink px-4 py-3">
+            <span aria-hidden className="block h-2 w-full rounded-full bg-white/40" />
           </div>
           <div className="flex gap-2">
-            <Avatar src={creator.avatarUrl} name={creator.name} size="sm" ring="ai" />
-            <div>
-              <AIBadge className="mb-1" />
-              <div className="rounded-[20px] rounded-tl-md border border-ai-line bg-surface px-4 py-2.5 text-sub leading-relaxed">
-                오늘 첫 컷이었어요. 물빛이 유난히 파래서 한참 서 있었어요.
+            <Dot className="ring-2 ring-ai-line" />
+            <div className="w-[75%]">
+              <div className="mb-1 flex items-center gap-1.5">
+                <span className="text-meta text-ink-2">🤖 크리에이터 AI</span>
+                <AIBadge />
+              </div>
+              <div className="rounded-[20px] rounded-tl-md border border-ai-line bg-surface px-4 py-3">
+                <Lines widths={["90%", "70%"]} />
               </div>
               <span className="mt-1 inline-flex h-6 items-center gap-1 rounded-full bg-ai-soft px-2 text-micro text-ai">
                 <span className="size-1.5 rounded-full bg-brand" />
-                오늘의 첫 Moment 기반
+                Moment 기반
               </span>
             </div>
           </div>
@@ -100,15 +116,15 @@ export function OnboardingCarousel({ creator, moments }: Props) {
       body: "크리에이터가 직접 대화에 들어오면 분명하게 알려드려요. 중심은 언제나 실제 크리에이터와 그 사람의 하루예요.",
       visual: (
         <div className="relative mx-auto w-[88%]">
-          <Photo src={creator.coverUrl} alt="" className="aspect-[4/3] rounded-[28px]" />
-          <div className="absolute inset-x-4 -bottom-10 flex gap-2 rounded-card bg-surface p-3">
-            <Avatar src={creator.avatarUrl} name={creator.name} size="sm" ring="human" />
-            <div className="min-w-0">
+          <div aria-hidden className="aspect-[4/3] rounded-[28px] bg-gradient-to-br from-brand-tint via-brand-soft to-surface" />
+          <div className="absolute inset-x-4 -bottom-10 flex gap-2 rounded-card bg-surface p-3 shadow-card">
+            <Dot className="ring-2 ring-brand" />
+            <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5 text-meta font-semibold">
-                {creator.name}
+                ✓ 크리에이터 본인
                 <HumanBadge />
               </div>
-              <p className="mt-1 text-caption leading-relaxed text-ink-2">첫 롤 현상하면 꼭 보여주세요 :)</p>
+              <Lines widths={["85%", "50%"]} className="mt-2" />
             </div>
           </div>
         </div>

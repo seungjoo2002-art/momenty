@@ -14,6 +14,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
+import { registerCleanup } from "./support/cleanup.mjs";
 import { chromium, type Page } from "playwright-core";
 
 process.loadEnvFile(".env.local");
@@ -102,6 +103,8 @@ const stamp = Date.now().toString(36);
 const A = { email: `momenty-ui-creator-${stamp}@gmail.com`, password: `Ui-${randomBytes(9).toString("base64url")}1a`, name: `UI 크리에이터 ${stamp.slice(-4)}`, handle: `ui.${stamp}` };
 const B = { email: `momenty-ui-fan-${stamp}@gmail.com`, password: `Ui-${randomBytes(9).toString("base64url")}1a`, name: "UI 팬" };
 const userIds: string[] = [];
+// Ctrl+C 등으로 끊겨도 이 실행이 만든 계정은 Storage → 계정 순서로 정리
+registerCleanup(admin, userIds);
 let creatorId = "";
 
 async function uidOf(email: string) {

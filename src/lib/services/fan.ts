@@ -9,6 +9,7 @@ import type { Creator, FanUser, Moment, Tier } from "@/lib/types";
 import { getCreators, invalidateCreators } from "./creators";
 import { ServiceError, toServiceError } from "./errors";
 import { getMomentsByIds, getTodayMomentsFor, notifyMomentsChanged } from "./moments";
+import { getMyBlockedUserIds } from "./safety";
 
 const GUEST: FanUser = { id: "", subscriptions: [] };
 
@@ -89,11 +90,12 @@ export async function getTodayFeed(): Promise<TodayFeedItem[]> {
   const fan = await getCurrentFan();
   if (!fan.subscriptions.length) return [];
   const ids = fan.subscriptions.map((s) => s.creatorId);
-  const [creators, todayMoments] = await Promise.all([getCreators(), getTodayMomentsFor(ids)]);
+  const [creators, todayMoments, blocked] = await Promise.all([getCreators(), getTodayMomentsFor(ids), getMyBlockedUserIds()]);
   return fan.subscriptions
     .flatMap((s) => {
       const creator = creators.find((c) => c.id === s.creatorId);
-      if (!creator) return [];
+      // 내가 차단한 크리에이터는 팔로우 중이어도 Today에 보이지 않는다
+      if (!creator || blocked.has(creator.profileId)) return [];
       return [{ creator, tier: s.tier, moments: todayMoments.filter((m) => m.creatorId === s.creatorId) }];
     })
     .sort((a, b) => {

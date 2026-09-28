@@ -6,12 +6,14 @@ import { useEffect, useState } from "react";
 import { useStudioCreator } from "@/components/auth/Gates";
 import { MOMENT_TYPE_META } from "@/components/moment/meta";
 import { MomentCard } from "@/components/moment/MomentCard";
+import { SafeShareReview, type SafeShareGate } from "@/components/studio/SafeShareReview";
 import { VisibilitySelector } from "@/components/studio/VisibilitySelector";
 import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
 import { ToggleRow } from "@/components/ui/Toggle";
 import { TopBar } from "@/components/ui/TopBar";
-import { clearDraft, getDraft, getDraftMedia, saveDraft, type DraftMedia, type MomentDraft } from "@/lib/services/drafts";
+import { describeSafeDelay, getSafeDelay, isScheduled, type SafeDelaySettings } from "@/lib/services/creatorSafety";
+import { clearDraft, getDraft, getDraftMedia, saveDraft, setDraftMedia, type DraftMedia, type MomentDraft } from "@/lib/services/drafts";
 import { createMoment } from "@/lib/services/moments";
 import type { Creator, Moment } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
@@ -38,8 +40,19 @@ export function MomentPreview() {
   return <PreviewBody creator={creator} initial={ready.draft} media={ready.media} />;
 }
 
-function PreviewBody({ creator, initial, media }: { creator: Creator; initial: MomentDraft; media: DraftMedia | null }) {
+function PreviewBody({ creator, initial, media: initialMedia }: { creator: Creator; initial: MomentDraft; media: DraftMedia | null }) {
   const router = useRouter();
+  // SafeShare에서 가리면 편집한 사진으로 바뀐다 (원본은 올리지 않는다)
+  const [media, setMediaState] = useState(initialMedia);
+  const [gate, setGate] = useState<SafeShareGate>(initialMedia ? "checking" : "ok");
+  const [safeDelay, setSafeDelay] = useState<SafeDelaySettings | null>(null);
+  useEffect(() => {
+    getSafeDelay(creator.id).then(setSafeDelay, () => setSafeDelay(null));
+  }, [creator.id]);
+  function replaceMedia(next: DraftMedia) {
+    setDraftMedia(creator.id, next);
+    setMediaState(next);
+  }
   const [draft, setDraft] = useState(initial);
   const [createdAt] = useState(() => new Date().toISOString());
   const [publishing, setPublishing] = useState(false);
@@ -79,17 +92,18 @@ function PreviewBody({ creator, initial, media }: { creator: Creator; initial: M
     setError(null);
     try {
       // 파일 업로드 → moments 저장 (저장이 실패하면 올린 파일은 서비스가 지운다)
-      await createMoment({
+      const saved = await createMoment({
         creatorId: creator.id,
         type: draft.type,
         content,
-        media: media ? { file: media.file, poster: media.poster } : undefined,
+        media: media ? { file: media.file, poster: media.poster, recordedInApp: media.recordedInApp } : undefined,
         durationSec: media?.durationSec ?? draft.durationSec,
         visibility: draft.visibility,
         aiContextEnabled: draft.aiContextEnabled,
       });
       await clearDraft(creator.id);
-      router.push("/studio?posted=1");
+      // Safe Delay로 공개 예정이면 크리에이터에게 알려준다 (팬은 이 시각을 받지 않는다)
+      router.push(isScheduled(saved.visibleAt) ? `/studio?posted=scheduled&at=${encodeURIComponent(saved.visibleAt!)}` : "/studio?posted=1");
     } catch (e) {
       setError(e instanceof Error ? e.message : "공개하지 못했어요. 다시 시도해 주세요.");
       setPublishing(false);
@@ -114,6 +128,12 @@ function PreviewBody({ creator, initial, media }: { creator: Creator; initial: M
           <MomentCard moment={moment} mode="preview" />
         </div>
       </section>
+
+      {media && (
+        <section className="px-5 pt-4">
+          <SafeShareReview media={media} onMedia={replaceMedia} onGate={setGate} />
+        </section>
+      )}
 
       <section className="px-5 pt-6">
         <h2 className="mb-2.5 text-name font-semibold">공개 범위</h2>
@@ -142,21 +162,24 @@ function PreviewBody({ creator, initial, media }: { creator: Creator; initial: M
               defaultOn={draft.aiContextEnabled}
               onChange={(aiContextEnabled) => change({ aiContextEnabled })}
             />
-            {/* SafeShare(위치 지연 · 얼굴 흐림)는 아직 없다 — 사진의 위치 정보(EXIF)는 업로드 전에 지운다 */}
-            <p className="px-4 py-3.5 text-caption leading-relaxed text-muted">사진의 위치 정보(EXIF)는 올리기 전에 지워져요.</p>
+            <p className="px-4 py-3.5 text-caption leading-relaxed text-muted">사진 · 영상의 위치 정보(EXIF 등)는 올리기 전에 지워져요.</p>
           </div>
         )}
       </section>
 
       <div className="sticky bottom-0 mt-auto bg-canvas/95 px-5 pt-4 pb-[max(env(safe-area-inset-bottom),16px)] backdrop-blur-md">
+        {safeDelay && safeDelay.mode !== "off" && (
+          <p className="mb-2 text-center text-meta text-muted">Safe Delay · {describeSafeDelay(safeDelay)}</p>
+        )}
+        {gate === "needs_review" && <p className="mb-2 text-center text-meta text-brand-deep">SafeShare 확인을 마치면 공개할 수 있어요.</p>}
         {error && <p className="mb-2.5 text-center text-caption text-danger">{error}</p>}
         <div className="flex gap-2">
           <Button size="lg" variant="secondary" onClick={edit} disabled={publishing}>
             수정하기
           </Button>
-          <Button size="lg" className="flex-1" onClick={publish} disabled={publishing}>
-            {publishing && <Loader2 className="size-5 animate-spin" />}
-            {publishing ? (media ? "올리는 중…" : "공개하는 중…") : "공개하기"}
+          <Button size="lg" className="flex-1" onClick={publish} disabled={publishing || gate !== "ok"}>
+            {(publishing || gate === "checking") && <Loader2 className="size-5 animate-spin" />}
+            {publishing ? (media ? "올리는 중…" : "공개하는 중…") : gate === "checking" ? "SafeShare 확인 중…" : safeDelay && safeDelay.mode !== "off" ? "공개 예약하기" : "공개하기"}
           </Button>
         </div>
       </div>

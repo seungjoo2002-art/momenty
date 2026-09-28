@@ -18,6 +18,18 @@ export const REPORT_REASONS = [
 ] as const;
 export type ReportReason = (typeof REPORT_REASONS)[number]["value"];
 
+/**
+ * 내가 차단한 사용자 id (프로필 id). Discover · Today · Archive · 새 대화 시작 목록에서 그 크리에이터를 숨기는 데 쓴다.
+ * RLS가 "내가 만든 차단"만 주므로 나를 차단한 사람은 알 수 없다. 로그인 전이면 빈 집합.
+ */
+export async function getMyBlockedUserIds(): Promise<Set<string>> {
+  const uid = await currentUserId();
+  if (!uid) return new Set();
+  const { data, error } = await supabase().from("user_blocks").select("blocked_id").eq("blocker_id", uid);
+  if (error) throw toServiceError(error, "차단 목록을 불러오지 못했어요.");
+  return new Set((data ?? []).map((r) => r.blocked_id as string));
+}
+
 /** 내가 차단한 사람인지 */
 export async function isBlockedByMe(userId: string): Promise<boolean> {
   const uid = await currentUserId();
@@ -50,4 +62,42 @@ export async function reportHumanMessage(messageId: string, reason: ReportReason
 export async function getMyReportedMessageIds(): Promise<Set<string>> {
   const { data } = await supabase().from("message_reports").select("message_id");
   return new Set((data ?? []).flatMap((r) => (r.message_id ? [r.message_id as string] : [])));
+}
+
+export interface BlockedAccount {
+  userId: string;
+  name: string;
+  avatarUrl: string | null;
+  /** 크리에이터 채널이 있는 사람이면 */
+  creatorId: string | null;
+  blockedAt: string;
+}
+
+/** 내가 차단한 계정 (나를 차단한 사람 목록은 없다 — RLS가 본인이 만든 차단만 준다) */
+export async function getMyBlocks(): Promise<BlockedAccount[]> {
+  const uid = await currentUserId();
+  if (!uid) return [];
+  const sb = supabase();
+  const { data, error } = await sb.from("user_blocks").select("blocked_id, created_at").eq("blocker_id", uid).order("created_at", { ascending: false });
+  if (error) throw toServiceError(error, "차단한 계정을 불러오지 못했어요.");
+  const ids = (data ?? []).map((r) => r.blocked_id as string);
+  if (!ids.length) return [];
+  const [profiles, creators] = await Promise.all([
+    sb.from("profiles").select("id, nickname, avatar_url").in("id", ids),
+    sb.from("creators").select("id, profile_id, name, avatar_url").in("profile_id", ids),
+  ]);
+  const p = new Map((profiles.data ?? []).map((r) => [r.id as string, r]));
+  const c = new Map((creators.data ?? []).map((r) => [r.profile_id as string, r]));
+  return (data ?? []).map((r) => {
+    const id = r.blocked_id as string;
+    const creator = c.get(id);
+    const profile = p.get(id);
+    return {
+      userId: id,
+      name: (creator?.name as string) || (profile?.nickname as string) || "MOMENTY 사용자",
+      avatarUrl: ((creator?.avatar_url ?? profile?.avatar_url) as string | null) ?? null,
+      creatorId: (creator?.id as string) ?? null,
+      blockedAt: r.created_at as string,
+    };
+  });
 }

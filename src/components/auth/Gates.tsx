@@ -7,10 +7,7 @@ import type { Creator } from "@/lib/types";
 import { useAuth } from "./AuthProvider";
 import { NotCreator } from "./NotCreator";
 
-/** 로그인 후 돌아올 주소 (같은 사이트 안의 경로만) */
-export function safeNext(next: string | undefined | null, fallback = ""): string {
-  return next && next.startsWith("/") && !next.startsWith("//") ? next : fallback;
-}
+export { safeNext } from "@/lib/utils/safeNext";
 
 export function loginHref(next: string) {
   return `/login?next=${encodeURIComponent(next)}`;

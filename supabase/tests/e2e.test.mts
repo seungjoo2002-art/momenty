@@ -14,6 +14,7 @@
 import { randomBytes } from "node:crypto";
 import { deflateSync } from "node:zlib";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { cleanupTestUsers, registerCleanup } from "./support/cleanup.mjs";
 
 process.loadEnvFile(".env.local");
 if (!process.argv.includes("--confirm-dev")) {
@@ -24,7 +25,6 @@ if (!process.argv.includes("--confirm-dev")) {
 const URL_ = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
 const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const env = (k: string) => process.env[`DEMO_${k}`] || "";
 const DOMAIN = process.env.E2E_EMAIL_DOMAIN || "gmail.com";
 
 // 메일 확인이 켜져 있으면 가입마다 실제 메일이 나간다 → 없는 주소로 보내면 반송이 쌓여 프로젝트 메일이 제한될 수 있다.
@@ -130,6 +130,7 @@ const A = { email: `momenty-e2e-creator-${stamp}@${DOMAIN}`, password: `E2e-${ra
 const B = { email: `momenty-e2e-fan-${stamp}@${DOMAIN}`, password: `E2e-${randomBytes(9).toString("base64url")}1a`, nickname: "E2E 팬" };
 const handle = `e2e.${stamp}`;
 const createdUsers: string[] = [];
+registerCleanup(admin, createdUsers);
 let creatorId = "";
 let aUid = "";
 let bUid = "";
@@ -439,11 +440,19 @@ try {
   });
 
   section("Security · 미디어 소유권 · created_at");
-  const demo = env("CREATOR_EMAIL") ? await rawClient(env("CREATOR_EMAIL"), env("CREATOR_PASSWORD")) : null;
+  // 다른 크리에이터 = 이 테스트가 만든 1회용 계정 (seed · 실제 계정을 쓰지 않는다)
+  const other = { email: `momenty-e2e-other-${stamp}@${DOMAIN}`, password: `E2e-${randomBytes(9).toString("base64url")}1a` };
   let otherPath = "";
-  await step("다른 크리에이터(seed c1)가 자기 폴더에 파일 업로드 (준비)", async () => {
-    if (!demo) return [false, "DEMO_CREATOR_* 없음"];
-    otherPath = `c1/e2e-other-${stamp}.png`;
+  await step("다른 크리에이터(1회용)가 자기 폴더에 파일 업로드 (준비)", async () => {
+    const sb = createClient(URL_, KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+    const { data: su, error: se } = await sb.auth.signUp({ email: other.email, password: other.password, options: { data: { nickname: "E2E 다른 크리에이터" } } });
+    if (se || !su.user) return [false, se?.message ?? "가입 실패"];
+    createdUsers.push(su.user.id);
+    if (!su.session) await admin.auth.admin.updateUserById(su.user.id, { email_confirm: true });
+    const demo = await rawClient(other.email, other.password);
+    const { data: ch, error: ce } = await demo.sb.from("creators").insert({ profile_id: demo.uid, name: "E2E 다른 크리에이터", handle: `e2eo.${stamp}`, category: "art" }).select("id").single();
+    if (ce) return [false, ce.message];
+    otherPath = `${ch.id}/e2e-other-${stamp}.png`;
     const { error } = await demo.sb.storage.from("moment-media").upload(otherPath, png(), { contentType: "image/png" });
     if (!error) cleanupFiles.push({ bucket: "moment-media", path: otherPath });
     return [!error, error?.message];
@@ -500,7 +509,8 @@ try {
     const paths = cleanupFiles.filter((f) => f.bucket === bucket).map((f) => f.path);
     if (paths.length) await admin.storage.from(bucket).remove(paths);
   }
-  for (const uid of createdUsers) await admin.auth.admin.deleteUser(uid); // profiles → creators → moments · subscriptions · reactions cascade
+  // 이 테스트가 만든 계정만: 남은 Storage(모든 채널 폴더 · 아바타) → 계정 → DB cascade
+  await cleanupTestUsers(admin, createdUsers);
   const { data: left } = await admin.from("creators").select("id").eq("handle", handle);
   console.log(`\n정리: 테스트 계정 ${createdUsers.length}명 · 파일 ${cleanupFiles.length}개 삭제 (남은 E2E 크리에이터: ${left?.length ?? "?"})`);
 }

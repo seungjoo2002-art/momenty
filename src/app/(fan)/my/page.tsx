@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, Brain, ChevronRight, CreditCard, HelpCircle, Loader2, LogOut, Repeat, Shield } from "lucide-react";
+import { Ban, Bell, Brain, ChevronRight, CreditCard, Flag, HelpCircle, Loader2, LogOut, Repeat, ShieldCheck, UserX } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -10,6 +10,7 @@ import { Avatar } from "@/components/ui/Avatar";
 import { LoadError } from "@/components/ui/LoadState";
 import { ListGroup, ListRow, SectionHeader, Stat } from "@/components/ui/primitives";
 import { useMomentData } from "@/lib/hooks/useMomentData";
+import { amIAdmin } from "@/lib/services/admin";
 import { signOut } from "@/lib/services/auth";
 import { getCreators } from "@/lib/services/creators";
 import { getCurrentFan, getSavedMomentIds } from "@/lib/services/fan";
@@ -22,8 +23,8 @@ export default function MyPage() {
   const [leaving, setLeaving] = useState(false);
   const [logoutError, setLogoutError] = useState<string | null>(null);
   const { data, error, retry } = useMomentData(`my:${account?.userId ?? ""}`, async () => {
-    const [fan, creators, saved] = await Promise.all([getCurrentFan(), getCreators(), getSavedMomentIds()]);
-    return { fan, creators, savedCount: saved.length };
+    const [fan, creators, saved, admin] = await Promise.all([getCurrentFan(), getCreators(), getSavedMomentIds(), amIAdmin().catch(() => false)]);
+    return { fan, creators, savedCount: saved.length, admin };
   });
 
   async function logout() {
@@ -91,12 +92,21 @@ export default function MyPage() {
       </section>
 
       <section className="mt-7">
-        <SectionHeader title="설정" />
+        <SectionHeader title="개인정보 및 안전" />
         <ListGroup>
           <ListRow href="/my/memory" icon={<Brain className="size-[18px]" />} label="AI Memory" description="Creator AI가 기억하는 나 · 보기와 삭제" />
+          <ListRow href="/my/blocked" icon={<Ban className="size-[18px]" />} label="차단한 계정" description="차단 목록 · 차단 해제" />
+          <ListRow href="/my/safety" icon={<ShieldCheck className="size-[18px]" />} label="SafeShare 안내" description="크리에이터의 하루를 안전하게 나누는 방법" />
+          <ListRow href="/my/account/delete" icon={<UserX className="size-[18px]" />} label="계정 삭제" />
+          {data?.admin && <ListRow href="/admin/reports" icon={<Flag className="size-[18px]" />} label="신고 처리" description="운영자 전용" />}
+        </ListGroup>
+      </section>
+
+      <section className="mt-7">
+        <SectionHeader title="설정" />
+        <ListGroup>
           <ListRow icon={<Bell className="size-[18px]" />} label="알림" />
           <ListRow icon={<CreditCard className="size-[18px]" />} label="결제 수단" />
-          <ListRow icon={<Shield className="size-[18px]" />} label="개인정보 · 안전" />
           <ListRow icon={<HelpCircle className="size-[18px]" />} label="고객센터" />
         </ListGroup>
       </section>

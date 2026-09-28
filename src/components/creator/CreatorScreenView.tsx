@@ -162,6 +162,8 @@ function IntroPanel({ creator, tier, isOwner }: { creator: Creator; tier?: Tier;
         <span className="font-medium text-brand">{CATEGORY_LABEL[creator.category]}</span>
         {creator.tags.map((t) => ` · #${t}`)}
       </p>
+      {/* 모든 크리에이터에게 같은 문구 — 누가 Safe Delay를 쓰는지 · 얼마나 늦추는지는 드러내지 않는다 */}
+      <p className="mt-2 break-keep text-meta text-faint">크리에이터 보호를 위해 실제 기록 시점과 공개 시점이 다를 수 있어요. Moment의 장소는 기록 당시의 장소예요.</p>
 
       <dl className="mt-5 grid grid-cols-2 gap-2.5">
         <div className="rounded-tile bg-surface px-4 py-3 ring-1 ring-line ring-inset">

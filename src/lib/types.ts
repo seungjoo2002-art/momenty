@@ -37,6 +37,8 @@ export interface Moment {
   reactions: Reactions;
   location?: string;
   safeShare?: SafeShareFlag[];
+  /** Safe Delay 공개 시각 — DB가 크리에이터 본인에게만 준다 (팬은 받지 않는다). 지금보다 뒤면 "공개 예정" */
+  visibleAt?: string;
   /** Creator AI가 이 Moment를 대화 참고 정보로 사용해도 되는지 */
   aiContextEnabled: boolean;
   /**

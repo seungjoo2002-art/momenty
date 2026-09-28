@@ -13,6 +13,7 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createServerClient } from "@supabase/ssr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { cleanupTestUsers, registerCleanup } from "./support/cleanup.mjs";
 
 process.loadEnvFile(".env.local");
 if (!process.argv.includes("--confirm-dev")) {
@@ -53,6 +54,7 @@ const stopServer = () => server?.pid && spawn("taskkill", ["/pid", String(server
 
 const stamp = Date.now().toString(36);
 const userIds: string[] = [];
+registerCleanup(admin, userIds);
 interface U {
   uid: string;
   sb: SupabaseClient;
@@ -150,7 +152,7 @@ try {
   failed++;
   console.error("테스트 준비/실행 실패:", e instanceof Error ? e.message : e);
 } finally {
-  for (const id of userIds) await admin.auth.admin.deleteUser(id).catch(() => {});
+  await cleanupTestUsers(admin, userIds);
   stopServer();
   mkdirSync(".tmp", { recursive: true });
   writeFileSync(".tmp/llm-hardening-replies.json", JSON.stringify(transcript, null, 1));

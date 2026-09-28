@@ -157,7 +157,7 @@ export function RecordComposer({ initial }: { initial: MomentDraft }) {
           setError(invalid);
           return;
         }
-        chooseMedia({ type: "voice", file: blob, previewUrl: URL.createObjectURL(blob), durationSec: duration });
+        chooseMedia({ type: "voice", file: blob, previewUrl: URL.createObjectURL(blob), durationSec: duration, recordedInApp: true });
       };
       recorder.current = r;
       startedAt.current = Date.now();

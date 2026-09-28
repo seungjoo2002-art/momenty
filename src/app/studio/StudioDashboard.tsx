@@ -16,7 +16,7 @@ import { PostedToast, StudioTimeline, TodayAvatar } from "./StudioToday";
 const TYPES: MomentType[] = ["photo", "video", "voice", "text"];
 
 /** Studio 첫 화면 — 로그인한 크리에이터 본인의 실제 데이터만 */
-export function StudioDashboard({ posted }: { posted: boolean }) {
+export function StudioDashboard({ posted, scheduledAt = null }: { posted: boolean; scheduledAt?: string | null }) {
   const creator = useStudioCreator();
   const { data } = useMomentData(`studio:${creator.id}`, async () => {
     const [stats, followers, fresh] = await Promise.all([getStudioStats(creator.id), getMyFollowers(creator.id, 12), getCreator(creator.id)]);
@@ -34,7 +34,7 @@ export function StudioDashboard({ posted }: { posted: boolean }) {
         </Link>
       </header>
 
-      {posted && <PostedToast />}
+      {posted && <PostedToast scheduledAt={scheduledAt} />}
 
       {/* 프로필 + 숫자 */}
       <section className="flex items-center gap-3 px-5 pt-3">

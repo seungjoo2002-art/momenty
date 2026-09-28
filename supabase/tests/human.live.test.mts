@@ -9,6 +9,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { cleanupTestUsers, registerCleanup } from "./support/cleanup.mjs";
 
 process.loadEnvFile(".env.local");
 if (!process.argv.includes("--confirm-dev")) {
@@ -39,6 +40,7 @@ const denied = (e: { message?: string; code?: string } | null, re: RegExp) => !!
 
 const stamp = Date.now().toString(36);
 const userIds: string[] = [];
+registerCleanup(admin, userIds);
 interface U {
   sb: SupabaseClient;
   uid: string;
@@ -114,6 +116,8 @@ try {
       setTimeout(resolve, 15_000);
     });
   await Promise.all([listen("F1", F1), listen("A", A), listen("F2", F2), listen("B", B)]);
+  // SUBSCRIBED 직후 postgres_changes 등록이 끝나기까지 잠깐 걸릴 수 있다 (앱은 연결 순간 한 번 다시 읽어 메운다)
+  await new Promise((r) => setTimeout(r, 2000));
 
   console.log("\n[Human Chat 기본 흐름]");
   let conv = "";
@@ -312,7 +316,7 @@ try {
   console.error("테스트 준비/실행 실패:", e instanceof Error ? e.message : e);
 } finally {
   for (const ch of channels) await ch.unsubscribe();
-  for (const id of userIds) await admin.auth.admin.deleteUser(id).catch(() => {});
+  await cleanupTestUsers(admin, userIds);
   console.log(`\n정리: 테스트 계정 ${userIds.length}명 삭제`);
   console.log(`\n${passed} passed, ${failed} failed`);
   setTimeout(() => process.exit(failed ? 1 : 0), 500);

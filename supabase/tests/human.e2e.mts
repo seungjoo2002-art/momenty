@@ -14,6 +14,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { cleanupTestUsers, registerCleanup } from "./support/cleanup.mjs";
 import { chromium, type Page } from "playwright-core";
 
 process.loadEnvFile(".env.local");
@@ -71,6 +72,7 @@ const stopServer = () => server?.pid && spawn("taskkill", ["/pid", String(server
 
 const stamp = Date.now().toString(36);
 const userIds: string[] = [];
+registerCleanup(admin, userIds);
 interface Acc {
   uid: string;
   email: string;
@@ -321,7 +323,7 @@ try {
   console.error("테스트 준비/실행 실패:", e instanceof Error ? e.message.split("\n")[0] : e);
 } finally {
   await browser.close().catch(() => {});
-  for (const id of userIds) await admin.auth.admin.deleteUser(id).catch(() => {});
+  await cleanupTestUsers(admin, userIds);
   stopServer();
   console.log(`\n정리: 테스트 계정 ${userIds.length}명 삭제 · 모델 호출 0회 · 스크린샷 ${SHOTS}/human-*.png`);
   console.log(`\n${passed} passed, ${failed} failed`);

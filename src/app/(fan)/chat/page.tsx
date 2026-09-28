@@ -12,6 +12,7 @@ import { getAiConversations } from "@/lib/services/aiChat";
 import { getCreators } from "@/lib/services/creators";
 import { getCurrentFan } from "@/lib/services/fan";
 import { getMyHumanConversations } from "@/lib/services/humanChat";
+import { getMyBlockedUserIds } from "@/lib/services/safety";
 import { canChat } from "@/lib/utils/access";
 
 /**
@@ -21,8 +22,8 @@ import { canChat } from "@/lib/utils/access";
 export default function ChatListPage() {
   const account = useAccount();
   const { data, error, retry } = useMomentData(`chats:${account?.userId ?? ""}`, async () => {
-    const [ai, human, creators, fan] = await Promise.all([getAiConversations(), getMyHumanConversations(), getCreators(), getCurrentFan()]);
-    return { ai, human, creators, fan };
+    const [ai, human, creators, fan, blocked] = await Promise.all([getAiConversations(), getMyHumanConversations(), getCreators(), getCurrentFan(), getMyBlockedUserIds()]);
+    return { ai, human, creators, fan, blocked };
   });
 
   if (!data) return <main className="min-h-dvh">{error && <LoadError message={error} onRetry={retry} className="pt-32" />}</main>;
@@ -49,7 +50,8 @@ export default function ChatListPage() {
     .filter((s) => canChat(s.tier) && !talked.has(s.creatorId))
     .flatMap((s) => {
       const c = creatorOf(s.creatorId);
-      return c && c.personaEnabled ? [c] : [];
+      // 새 대화 시작 목록에서는 차단한 크리에이터를 뺀다 (이미 있는 대화 기록은 그대로 보인다)
+      return c && c.personaEnabled && !data.blocked.has(c.profileId) ? [c] : [];
     });
 
   return (

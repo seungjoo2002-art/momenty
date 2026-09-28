@@ -12,7 +12,7 @@ import { TopBar } from "@/components/ui/TopBar";
 import { nextPathFor, resendConfirmation, signIn } from "@/lib/services/auth";
 import { ServiceError } from "@/lib/services/errors";
 
-export function LoginForm({ next }: { next?: string }) {
+export function LoginForm({ next, deleted = false }: { next?: string; /** 방금 계정을 삭제하고 온 경우 */ deleted?: boolean }) {
   const router = useRouter();
   const { state, refresh } = useAuth();
   const [email, setEmail] = useState("");
@@ -63,6 +63,11 @@ export function LoginForm({ next }: { next?: string }) {
           <br />
           <span className="text-muted">오늘도 함께하는 하루.</span>
         </h1>
+        {deleted && (
+          <p role="status" className="mt-4 rounded-tile bg-brand-tint px-3.5 py-2.5 text-caption text-ink-2">
+            계정을 삭제했어요. 그동안 함께해 주셔서 고마워요.
+          </p>
+        )}
 
         <div className="mt-10 space-y-4">
           <Field label="이메일" type="email" name="email" autoComplete="email" inputMode="email" placeholder="you@momenty.app" value={email} onChange={(e) => setEmail(e.target.value)} required />

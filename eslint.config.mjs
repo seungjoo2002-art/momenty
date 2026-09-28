@@ -12,7 +12,8 @@ const eslintConfig = defineConfig([
       "@next/next/no-img-element": "off",
     },
   },
-  globalIgnores([".next/**", "out/**", "build/**", "next-env.d.ts"]),
+  // public/ocr: Tesseract.js 배포 파일 (scripts/copy-ocr-assets.mjs가 복사하는 외부 빌드 결과물)
+  globalIgnores([".next/**", "out/**", "build/**", "next-env.d.ts", "public/ocr/**"]),
 ]);
 
 export default eslintConfig;

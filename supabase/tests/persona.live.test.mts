@@ -10,6 +10,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { cleanupTestUsers, registerCleanup } from "./support/cleanup.mjs";
 
 process.loadEnvFile(".env.local");
 if (!process.argv.includes("--confirm-dev")) {
@@ -59,6 +60,7 @@ const denied = (e: { message?: string; code?: string } | null, re: RegExp) => !!
 
 const stamp = Date.now().toString(36);
 const userIds: string[] = [];
+registerCleanup(admin, userIds);
 async function newUser(tag: string): Promise<{ sb: SupabaseClient; uid: string }> {
   const sb = createClient(URL_, KEY, { auth: { persistSession: false, autoRefreshToken: false } });
   const { data, error } = await sb.auth.signUp({ email: `momenty-pl-${tag}-${stamp}@gmail.com`, password: `Pl-${randomBytes(9).toString("base64url")}1a` });
@@ -308,7 +310,7 @@ try {
   current.items.push({ name: "예상치 못한 오류", ok: false, detail: e instanceof Error ? e.message : String(e) });
   console.log(`   ✗ ${e instanceof Error ? e.message : e}`);
 } finally {
-  for (const uid of userIds) await admin.auth.admin.deleteUser(uid);
+  await cleanupTestUsers(admin, userIds);
   console.log(`\n정리: 테스트 계정 ${userIds.length}명 삭제 (크리에이터 · Persona · Fact · 대화 · Moment는 cascade). rate limit 카운터는 private 스키마라 남는다 (지워진 사용자 id 기준 · 무해)`);
 }
 

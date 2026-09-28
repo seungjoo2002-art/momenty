@@ -51,6 +51,7 @@ export default function StudioSettingsPage() {
           <ListRow href="/studio/records" icon={<FolderClock className={icon} />} label="내 기록 (Records)" description="지금까지 남긴 하루들" />
           <ListRow icon={<CreditCard className={icon} />} label="구독 가격 · 정산" description="결제 연동 후 열려요" />
           <ListRow icon={<Bell className={icon} />} label="알림" />
+          <ListRow href="/my/account/delete" icon={<UserRound className={icon} />} label="계정 삭제" description="채널 · Moment · 파일을 모두 지워요" />
         </ListGroup>
       </section>
 
@@ -59,7 +60,7 @@ export default function StudioSettingsPage() {
         <ListGroup>
           <ListRow href="/studio/settings/persona" icon={<MessagesSquare className={icon} />} label="Creator AI · Persona" description="켜기 · 말투 · 성향 · 확인된 사실" />
           <ListRow href="/studio/settings/persona#boundaries" icon={<Ban className={icon} />} label="대화 경계" description="AI가 답하지 않을 주제" />
-          <ListRow icon={<ShieldCheck className={icon} />} label="SafeShare" description="위치 · 얼굴 · 개인정보 보호" />
+          <ListRow href="/studio/settings/safeshare" icon={<ShieldCheck className={icon} />} label="SafeShare · Safe Delay" description="위치 정보 제거 · 사진 속 개인정보 확인 · 공개 지연" />
         </ListGroup>
       </section>
 
