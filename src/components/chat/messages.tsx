@@ -18,11 +18,14 @@ export function AIMessage({
   text,
   createdAt,
   refMoments = [],
+  remembered = false,
 }: {
   creator: Pick<Creator, "name" | "avatarUrl">;
   text: string;
   createdAt: string;
   refMoments?: Pick<Moment, "id" | "createdAt">[];
+  /** 이 대화에서 AI Memory에 기억한 것이 있음 — 관리 화면으로 가는 작은 표시 */
+  remembered?: boolean;
 }) {
   return (
     <div className="flex gap-2 pr-12">
@@ -47,6 +50,11 @@ export function AIMessage({
             </Link>
           ))}
           <time className="text-micro text-faint">{formatClock(createdAt)}</time>
+          {remembered && (
+            <Link href="/my/memory" className="text-micro text-faint underline-offset-2 hover:text-ai hover:underline">
+              · 기억했어요
+            </Link>
+          )}
         </div>
       </div>
     </div>

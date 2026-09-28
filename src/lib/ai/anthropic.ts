@@ -2,7 +2,7 @@
  * Anthropic(Claude) Provider — 공식 @anthropic-ai/sdk. 서버 전용.
  *
  * · 모델은 AI_MODEL 환경 변수 그대로 (코드에 모델명을 두지 않는다).
- * · 답 형식은 structured outputs(zod 스키마)로 강제: { reply, moments }.
+ * · 답 형식은 structured outputs(zod 스키마)로 강제: { reply, moments, memories }.
  * · 안전 거절(stop_reason = "refusal")은 그대로 존중한다 — 다른 모델로 다시 부르지 않는다 (fallback 없음).
  * · 재시도는 기술적 오류만: SDK 기본 재시도(408 · 409 · 429 · 5xx · 연결 오류)를 2회로 제한, 요청당 timeout 30초.
  *   재시도는 저장 전에 일어나므로 메시지가 두 번 저장되지 않는다 (저장은 성공한 답 하나로 한 번).
@@ -19,6 +19,8 @@ import { ProviderError } from "./providerError";
 const ReplySchema = z.object({
   reply: z.string(),
   moments: z.array(z.string()),
+  // Fan Memory 후보 (팬에 관한 것) — 서버가 다시 거르고, DB가 Memory ON · 민감정보를 최종 판단한다
+  memories: z.array(z.object({ category: z.enum(["nickname", "interest", "favorite", "schedule", "other"]), content: z.string() })),
 });
 
 /** 생각(thinking)과 답이 함께 쓰는 출력 상한 — 답 길이는 STYLE 층이 정한다 */

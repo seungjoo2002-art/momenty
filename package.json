@@ -17,7 +17,11 @@
     "test:ui": "tsx supabase/tests/ui.e2e.mts",
     "test:ai": "tsx supabase/tests/ai.test.mts",
     "test:persona-live": "tsx supabase/tests/persona.live.test.mts",
-    "test:llm": "tsx supabase/tests/persona.llm.test.mts"
+    "test:llm": "tsx supabase/tests/persona.llm.test.mts",
+    "test:llm-hardening": "tsx supabase/tests/persona.hardening.llm.test.mts",
+    "test:unit": "tsx --conditions=react-server supabase/tests/guard.unit.test.mts && tsx --conditions=react-server supabase/tests/memory.unit.test.mts",
+    "test:llm-memory": "tsx supabase/tests/memory.llm.test.mts",
+    "test:core-loop": "tsx supabase/tests/core-loop.e2e.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",

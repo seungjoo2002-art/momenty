@@ -93,7 +93,7 @@ export default function MyPage() {
       <section className="mt-7">
         <SectionHeader title="설정" />
         <ListGroup>
-          <ListRow icon={<Brain className="size-[18px]" />} label="Fan Memory" description="Creator AI와 함께 열려요" />
+          <ListRow href="/my/memory" icon={<Brain className="size-[18px]" />} label="AI Memory" description="Creator AI가 기억하는 나 · 보기와 삭제" />
           <ListRow icon={<Bell className="size-[18px]" />} label="알림" />
           <ListRow icon={<CreditCard className="size-[18px]" />} label="결제 수단" />
           <ListRow icon={<Shield className="size-[18px]" />} label="개인정보 · 안전" />

@@ -12,7 +12,7 @@
  *   2. facts        크리에이터가 확인한 사실         (저장소 없음)
  *   3. boundaries   답하지 않을 주제                 (저장소 없음)
  *   4. today        오늘 Moment (볼 수 있고 AI 참고 허용된 것)
- *   5. fanMemory    팬이 허용한 Fan Memory           (저장소 없음)
+ *   5. fanMemory    팬이 허용한 Fan Memory           (lib/ai/memory.ts — ai_fan_memory_context로 따로 읽는다)
  *   6. conversation 현재 대화                        (저장소 없음)
  */
 import "server-only";
@@ -34,6 +34,8 @@ export interface ContextMoment {
   type: MomentType;
   /** 글 · 캡션만 (미디어 파일은 Context에 넣지 않는다) */
   content: string;
+  /** 크리에이터가 Moment에 공개한 장소 (팬 화면에도 보이는 값) — 없으면 null */
+  location: string | null;
   createdAt: string;
   visibility: Visibility;
 }
@@ -59,13 +61,14 @@ export interface PersonaContext {
   focus: ContextMoment | null;
 }
 
-const MOMENT_COLUMNS = "id, type, content, created_at, visibility";
+const MOMENT_COLUMNS = "id, type, content, location, created_at, visibility";
 const TODAY_LIMIT = 50;
 
 interface MomentRow {
   id: string;
   type: MomentType;
   content: string;
+  location: string | null;
   created_at: string;
   visibility: "public" | "subscriber" | "premium";
 }
@@ -74,6 +77,7 @@ const toContextMoment = (r: MomentRow): ContextMoment => ({
   id: r.id,
   type: r.type,
   content: r.content,
+  location: r.location?.trim() || null,
   createdAt: new Date(r.created_at).toISOString(),
   visibility: r.visibility === "subscriber" ? "subscribers" : r.visibility,
 });

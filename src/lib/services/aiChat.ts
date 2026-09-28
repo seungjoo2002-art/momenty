@@ -116,6 +116,8 @@ export interface AiChatResult {
   message: AiChatMessage;
   /** LLM이 아직 연결되지 않은 서버면 null (답도 저장도 없음) */
   generated: boolean;
+  /** 이번 대화에서 AI Memory에 새로 기억한 개수 (팬이 Memory를 켰을 때만 0보다 클 수 있다) */
+  memorySaved: number;
 }
 
 /** 팬 메시지 보내기 → 서버가 권한 · Context를 정하고 답한다 */
@@ -134,6 +136,7 @@ export async function sendAiMessage(input: { creatorId: string; message: string;
     ok?: boolean;
     status?: string;
     message?: { id: string; content: string; boundary: string | null; groundedMomentIds: string[] };
+    meta?: { memory?: { saved?: number } };
     error?: { code?: AiChatErrorCode; message?: string; resetAt?: string };
   };
   if (!res.ok || !body.ok) {
@@ -144,6 +147,7 @@ export async function sendAiMessage(input: { creatorId: string; message: string;
   }
   return {
     generated: true,
+    memorySaved: Number(body.meta?.memory?.saved ?? 0),
     message: {
       id: body.message.id,
       sender: "ai",

@@ -25,6 +25,10 @@ export interface AiResponseMeta {
     momentIds: string[];
     focusMomentId: string | null;
   };
+  /** 서버 가드가 개입했는지 — pre: 막힌 주제라 거절 모드로 불렀다 · post: 모델 답을 버리고 고정 문장으로 바꿨다 (내용은 담지 않는다) */
+  guard: { stage: "pre" | "post"; topic: string } | null;
+  /** Fan Memory — 켜져 있는지 · 이번 답에 쓴 개수 · 새로 기억한 개수 (내용은 담지 않는다) */
+  memory: { enabled: boolean; used: number; saved: number };
 }
 
 export interface AiAuditEvent {
@@ -36,6 +40,9 @@ export interface AiAuditEvent {
   messageLength?: number;
   contextTypes?: ContextType[];
   contextCount?: number;
+  guard?: string;
+  memoryUsed?: number;
+  memorySaved?: number;
 }
 
 export function auditAi(e: AiAuditEvent) {

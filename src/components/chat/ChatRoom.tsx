@@ -34,13 +34,17 @@ export function ChatRoom({ creator, focusMomentId }: { creator: Creator; focusMo
   });
 
   const [pending, setPending] = useState<string | null>(null);
-  const [sent, setSent] = useState<AiChatMessage[]>([]);
+  // 방금 보낸 (팬 · AI) 쌍 — 다시 읽은 대화에 그 AI 메시지가 들어올 때까지 화면에 남겨 둔다 (보낸 직후 사라지지 않게)
+  const [sent, setSent] = useState<{ fan: AiChatMessage; ai: AiChatMessage }[]>([]);
   const [input, setInput] = useState("");
   const [err, setErr] = useState<AiChatError | null>(null);
   const [focusOn, setFocusOn] = useState(true);
+  // 이 화면에서 보낸 답 중 AI Memory에 기억한 것 (표시만 — 기억 내용은 My > AI Memory에서)
+  const [remembered, setRemembered] = useState<Set<string>>(new Set());
   const bottom = useRef<HTMLDivElement>(null);
 
-  const messages = [...(data?.messages ?? []), ...sent.filter((m) => !(data?.messages ?? []).some((x) => x.id === m.id))];
+  const loaded = data?.messages ?? [];
+  const messages = [...loaded, ...sent.filter((p) => !loaded.some((x) => x.id === p.ai.id)).flatMap((p) => [p.fan, p.ai])];
   const refOf = (ids: string[]): Moment[] => (data?.refs ?? []).filter((m) => ids.includes(m.id));
 
   useEffect(() => {
@@ -55,9 +59,11 @@ export function ChatRoom({ creator, focusMomentId }: { creator: Creator; focusMo
     setInput("");
     setErr(null);
     try {
-      await sendAiMessage({ creatorId: creator.id, message: text, momentId: focusOn && data?.focus ? data.focus.id : undefined });
-      // 저장된 대화를 다시 읽는다 (서버가 저장한 그대로 — 시각 · 근거 Moment 포함)
-      setSent([]);
+      const res = await sendAiMessage({ creatorId: creator.id, message: text, momentId: focusOn && data?.focus ? data.focus.id : undefined });
+      if (res.memorySaved > 0) setRemembered((prev) => new Set([...prev, res.message.id]));
+      const fan: AiChatMessage = { id: `sent-${res.message.id}`, sender: "fan", content: text, createdAt: new Date().toISOString(), groundedMomentIds: [], boundary: null };
+      setSent((prev) => [...prev, { fan, ai: res.message }]);
+      // 저장된 대화를 다시 읽는다 (서버가 저장한 그대로 — 시각 · 근거 Moment 포함). 들어오면 위의 쌍은 자동으로 빠진다
       retry();
     } catch (ex) {
       setErr(ex instanceof AiChatError ? ex : new AiChatError("잠시 후 다시 시도해 주세요.", "error"));
@@ -89,7 +95,7 @@ export function ChatRoom({ creator, focusMomentId }: { creator: Creator; focusMo
           m.sender === "fan" ? (
             <FanMessage key={m.id} text={m.content} createdAt={m.createdAt} />
           ) : (
-            <AIMessage key={m.id} creator={creator} text={m.content} createdAt={m.createdAt} refMoments={refOf(m.groundedMomentIds)} />
+            <AIMessage key={m.id} creator={creator} text={m.content} createdAt={m.createdAt} refMoments={refOf(m.groundedMomentIds)} remembered={remembered.has(m.id)} />
           ),
         )}
         {pending && (

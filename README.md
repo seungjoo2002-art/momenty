@@ -4,7 +4,7 @@
 오늘의 기록을 바탕으로 한 **Creator AI(Persona)**, 그리고 때때로 **실제 크리에이터(Human)**와 대화합니다.
 
 > 현재 단계(v0.4): 실제 가입 사용자가 Fan / Creator로 사용하는 앱. Supabase Auth · Postgres(RLS) · Storage 기반.
-> Creator AI(Persona) · Fan Memory · AI Fan Manager · 결제는 아직 열지 않았다 — 화면에서는 "준비 중"으로 보인다.
+> Creator AI(Persona, v0.5-2) · Fan Memory(v0.6)는 열려 있다. AI Fan Manager · 결제는 아직 열지 않았다 — 화면에서는 "준비 중"으로 보인다.
 
 ## 실행
 
@@ -39,9 +39,9 @@ src/
 │  │  ├─ creators/[id]/today/   Creator Today (세로 Timeline)
 │  │  ├─ moments/[id]/          Moment Detail
 │  │  ├─ subscribe/[id]/        Subscription
-│  │  ├─ chat/ · chat/[id]/     Creator AI 대화 — 준비 중 (v0.5)
+│  │  ├─ chat/ · chat/[id]/     Creator AI 대화 (v0.5-2)
 │  │  ├─ archive/               Archive
-│  │  └─ my/ · my/memory/       My Page · Fan Memory(준비 중)
+│  │  └─ my/ · my/memory/       My Page · AI Memory (v0.6 — 팬 본인만 보기 · 삭제)
 │  └─ studio/                   Creator Mode + 크리에이터 BottomNavigation
 │     ├─ record/ · record/preview/   Moment 기록 · 미리보기 + 공개범위
 │     ├─ fans/ · fans/[id]/          실제 팔로워 목록 · Fan Manager(준비 중)
@@ -128,6 +128,7 @@ npx supabase db push          # supabase/migrations 를 순서대로 적용
 3. `supabase/migrations/20260927020000_grant_service_role.sql` — service_role 테이블 권한 (seed · 서버 전용 작업용).
 4. `supabase/migrations/20260927030000_v04_auth_profiles_media.sql` — v0.4: 컬럼 단위 쓰기 권한, 미디어 경로 검증 trigger, 무료 팔로우, 팔로워 수 집계, avatars bucket · 파일 형식/크기 제한, 보관함, orphan 파일 조회 함수.
 5. `supabase/migrations/20260928000000_v05_persona_chat.sql` — v0.5-2: Persona · 사실 · 경계 · AI 대화 · 서버 키 함수 · 공유 rate limit. 적용 후 `insert into private.server_keys (id, key_hash) values ('ai', encode(sha256('<AI_SERVER_KEY>'), 'hex'))` 로 서버 키 해시를 등록한다.
+6. `supabase/migrations/20260928120000_v06_fan_memory.sql` — v0.6: Fan Memory (`fan_ai_settings` · `fan_memories` · 민감정보 판정 · `ai_fan_memory_context` · `record_fan_memories`).
 
 ### 3. 개발용 seed (선택)
 
@@ -191,6 +192,10 @@ npm run build && npm run test:ui -- --confirm-dev   # 설치된 Chrome으로 화
 npm run build && npm run test:ai -- --confirm-dev   # 서버 라우트 보호 · /api/ai/chat 인증 · 입력 · 권한 · Context · injection · rate limit (LLM 없이)
 npm run test:persona-live -- --confirm-dev          # 실제 프로젝트: Persona · Facts · Boundaries RLS · 서버 키 함수 · 공유 rate limit(동시성)
 npm run build && npm run test:llm -- --confirm-dev  # 실제 Anthropic 호출(비용 발생, 약 13회): Truth · Grounding · Boundary · injection · 품질
+npm run test:unit                                   # LLM · DB 없이: 경계 가드(장소 · 현재 위치) · Fan Memory 필터 · Prompt 층
+npm run build && npm run test:llm-hardening -- --confirm-dev  # 실제 호출 3회: 1인칭 · ㅎㅎ 금지 · 과거 장소는 과거형으로
+npm run build && npm run test:llm-memory -- --confirm-dev     # 실제 호출 약 9회: Fan Memory 추출 · 회상 · 격리 · OFF · 삭제 · 민감정보 · dump
+npm run build && npm run test:core-loop -- --confirm-dev      # 실제 Chrome + Supabase + Anthropic(2회): Moment 작성 → Today → 상세 → AI → Memory → 재로그인 → 삭제
 npm run db:cleanup-media -- --dry-run --confirm-dev # 참조 없는 업로드 파일 찾기 (--dry-run 빼면 삭제)
 ```
 
@@ -223,13 +228,27 @@ Chat UI ─ { creatorId, message, momentId? } ─▶ /api/ai/chat
 |---|---|
 | 데이터 | `creator_personas`(말투 · 성향) · `creator_facts`(확인된 사실) · `creator_boundaries`(주제 10개) · `ai_conversations` · `ai_messages` — migration `20260928000000_v05_persona_chat.sql` |
 | 서버 키 | `AI_SERVER_KEY`(서버 환경 변수) — DB에는 SHA-256 해시만(`private.server_keys`). 팬 JWT + 서버 키가 모두 있어야 Persona · 저장 · rate limit 함수가 동작 → 팬이 브라우저에서 AI 메시지를 위조하거나 설정 원문을 가져갈 수 없다 |
-| Prompt | SYSTEM → STYLE → PERSONALITY → VERIFIED FACTS → BOUNDARIES → TODAY CONTEXT → FAN CONTEXT(비어 있음) → CONVERSATION → USER (`src/lib/ai/prompt.ts`) |
+| Prompt | SYSTEM → STYLE → PERSONALITY → VERIFIED FACTS → BOUNDARIES → TODAY CONTEXT → FAN CONTEXT(FACTS ABOUT THIS FAN — v0.6) → CONVERSATION → USER (`src/lib/ai/prompt.ts`) |
 | Truth Rule | 사실로 말할 수 있는 것: 확인된 사실 · 팬이 볼 수 있는 오늘 Moment · 대화에서 팬이 말한 것. 없으면 "기록에 없어서 지어내게 된다"고 말한다. 기록에 없는 감정 · 평가도 덧붙이지 않는다 |
 | 근거 | 모델은 Moment를 별칭(m1…)으로만 보고, 답과 함께 쓴 별칭을 돌려준다 → 서버가 id로 바꾸고 DB가 다시 검증해 저장 |
 | 경계 | 막힌 주제는 LLM 호출 전 서버가 감지해 거절 모드(오늘 기록 · 사실 제외), 답에서 위치 · 만남 약속 · 유출 · 사칭이 보이면 고정 거절 문장으로 교체. 노골적 성적 내용은 설정과 무관하게 차단 |
 | 거절 · 재시도 | 모델의 안전 거절은 그대로 존중(다른 모델로 재시도하지 않음). 기술적 오류만 SDK 재시도 2회 · 30초 timeout. 저장은 성공한 답 하나로 한 번 — 실패하면 팬 메시지도 저장하지 않는다 |
 | 표시 | 대화방 상단 "AI가 생성한 답변입니다", AI 메시지 "🤖 {이름} AI". 실제 크리에이터 표시(✓ {이름})는 Human takeover 단계에서만 |
 | 설정 | Studio → 설정 → Creator AI · Persona. 말투를 한 번 저장해야 팬이 대화를 시작할 수 있다 |
+
+### Fan Memory (v0.6)
+
+Fan Memory는 "지금 대화하는 팬에 관한" 관계 맥락(호칭 · 관심사 · 좋아하는 것 · 일정)이다. 크리에이터에 관한 사실(VERIFIED FACTS)과는 테이블 · 함수 · Prompt 칸이 모두 다르다.
+
+| 항목 | 내용 |
+|---|---|
+| 기본값 | **OFF(opt-in)** — 팬이 My > AI Memory에서 켜야 기억한다 |
+| 범위 | fan × creator. 다른 크리에이터 AI는 쓰지 못한다. Prompt에는 관련 있는 것 · 최근 것 최대 6개(DB도 8개로 자름) |
+| 권한 | 팬 본인만 조회 · 삭제(개별 · 크리에이터별 · 전체). insert · update는 아무에게도 없다 → `record_fan_memories`(서버 키 + 팬 JWT)만. 크리에이터는 Memory · 대화 원문을 읽을 수 없다. service role 미사용 |
+| OFF | 새로 기억하지 않고 기존 Memory도 Prompt에 넣지 않는다. 기존 Memory는 자동 삭제하지 않는다 |
+| 민감정보 | 건강 · 정신건강 · 성 · 주소/연락처 · 금융/인증정보 · 식별번호 · 정치 · 종교 · 범죄 등은 서버 필터 + DB 함수 + 테이블 제약에서 저장하지 않는다 |
+| 추출 | 같은 모델 호출의 structured output `memories`(최대 3개) → 서버 필터(형식 · 민감 · 크리에이터 이름 · 중복) → DB 재검증. 거절 모드 · 가드 개입 시에는 저장하지 않는다 |
+| 표시 | 기억한 답 아래 작은 "· 기억했어요"(→ My > AI Memory) |
 
 AI 키는 `AI_PROVIDER=anthropic` · `AI_API_KEY` · `AI_MODEL` (서버 환경 변수). `src/lib/ai/*`는 `server-only` — Client Component에서 import하면 빌드가 실패한다.
 

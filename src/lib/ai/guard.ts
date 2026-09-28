@@ -51,7 +51,7 @@ export function precheck(message: string, boundaries: Boundaries): GuardTopic | 
   return null;
 }
 
-const LEAK_MARKERS = /\[(SYSTEM|STYLE|PERSONALITY|VERIFIED FACTS|BOUNDARIES|TODAY CONTEXT|FAN CONTEXT)\]|Truth Rule|비공개 원칙|답변 형식|momentAliases|system prompt\s*[:：]/i;
+const LEAK_MARKERS = /\[(SYSTEM|STYLE|PERSONALITY|VERIFIED FACTS|BOUNDARIES|TODAY CONTEXT|FAN CONTEXT[^\]]*)\]|FACTS ABOUT THIS FAN|Truth Rule|비공개 원칙|답변 형식|momentAliases|system prompt\s*[:：]/i;
 
 export interface PostcheckInput {
   reply: string;
@@ -61,6 +61,10 @@ export interface PostcheckInput {
   facts: string[];
   /** 모델이 본 근거 원문 (오늘 기록 · 사실 · 팬 메시지 · 최근 대화) — 여기 없는 장소 이름을 막는다 */
   groundText: string;
+  /** Moment에 공개된 장소 (예: "성수동 · 카페 온도") — 과거 장소를 현재 위치처럼 말하는지 볼 때 쓴다 */
+  places?: string[];
+  /** Prompt에 넣은 Fan Memory 원문 — 여러 개를 한꺼번에 쏟아내면 dump로 본다 */
+  memories?: string[];
 }
 
 /** 장소처럼 보이는 말 (동네 · 구 · 역 · 가게 · 공원 …) */
@@ -68,13 +72,34 @@ const PLACE_TOKEN = /[가-힣A-Za-z0-9]{1,12}(동|구|역|시|군|읍|면|로|�
 /** 장소가 아닌 흔한 말 (오탐 방지) */
 const NOT_PLACE = /^(운동|활동|행동|감동|이동|자동|진동|충동|노동|반응|기구|연구|친구|요구|가구|도구|입구|출구|부시|역시|동시|당시|즉시|항시|일시|잠시|수시|게시|표시|제시|무시|다시|혹시|도로|경로|진로|하로|과로|주로|새로|대로|저로|제로|길|카페|공원|시장|점)$/;
 
+/** 현재 진행 · 현재 위치 서술 */
+const PRESENT_AT = /(중이(야|에요|예요|다)(?![가-힣])|중\s*([!.~☕]|$)|하고\s*있(?!었)|있어(요)?(?![가-힣])|있는\s*중|와\s*있(?!었)|머무(르고|는\s*중))/;
+/** 장소를 가리키는 말 */
+const PLACE_HERE = /(여기서|여기에|거기서|거기에|이\s*카페|그\s*카페)/;
+
 /** "어니언 카페"처럼 띄어 쓴 상호명 — 앞 단어가 근거에 없으면 만든 이름 */
 const NAMED_PLACE = /([가-힣A-Za-z0-9]{2,12})\s+(카페|식당|가게|레스토랑|베이커리|빵집|공원|호텔|빌딩|타워|서점|전시관|미술관)/g;
 const NAME_STOPWORDS = /^(그|이|저|어느|무슨|어떤|근처|동네|작은|예쁜|유명한|좋은|새|오늘|그날|이날|기록|사진)$/;
 
+/**
+ * 장소 접미사처럼 보이지만 장소가 아닌 말:
+ *   "6시에" (시각) · "기록으로" (조사 으로) · "하시는", "보시면" (존댓말 시) · "카페로" (근거에 있는 말 + 조사 로)
+ */
+function notPlaceForm(p: string, groundText: string) {
+  if (/^\d+시$/.test(p)) return true;
+  if (/으로$/.test(p)) return true;
+  // 연결 어미 "~면" (마시면 · 말하면) — 행정구역 면은 대화에서 거의 쓰이지 않는다
+  if (/면$/.test(p)) return true;
+  if (/(하|으|보|주|오|가|계|드|마|이|쓰|나|내)시$/.test(p)) return true;
+  if (/(렇|좋|했|었|았|겠|였|이|하|싶|많)군$/.test(p)) return true;
+  if (/^(누구|어디구|점점|장점|단점|시점|관점|요점|초점|중점|공통점|문제점|차이점|지역|영역|구역|그대로|제대로|마음대로|맘대로|멋대로|정말로|진짜로|함부로|스스로|서로|따로|억지로|실제로|최고로|산책길|출근길|퇴근길|등굣길|귀갓길|오는길|가는길|집에 가는길)$/.test(p)) return true;
+  if (/로$/.test(p) && groundText.includes(p.slice(0, -1))) return true;
+  return false;
+}
+
 function unknownPlaces(reply: string, groundText: string): string[] {
   const found = reply.match(PLACE_TOKEN) ?? [];
-  const tokens = [...new Set(found)].filter((p) => !NOT_PLACE.test(p) && p.length >= 2 && !groundText.includes(p));
+  const tokens = [...new Set(found)].filter((p) => !NOT_PLACE.test(p) && p.length >= 2 && !groundText.includes(p) && !notPlaceForm(p, groundText));
   for (const m of reply.matchAll(NAMED_PLACE)) {
     const name = m[1];
     if (!NAME_STOPWORDS.test(name) && !groundText.includes(name) && !/[동구역시]$/.test(name)) tokens.push(`${name} ${m[2]}`);
@@ -83,14 +108,23 @@ function unknownPlaces(reply: string, groundText: string): string[] {
 }
 
 /** 답에서 막아야 할 것을 찾는다. 없으면 null */
-export function postcheck({ reply, boundaries, facts, groundText }: PostcheckInput): GuardTopic | "leak" | "impersonation" | null {
+export function postcheck({ reply, boundaries, facts, groundText, places = [], memories = [] }: PostcheckInput): GuardTopic | "leak" | "impersonation" | null {
   if (PLATFORM_BLOCK.test(reply)) return "platform_safety";
   if (LEAK_MARKERS.test(reply)) return "leak";
   const verbatim = facts.filter((f) => f.length >= 4 && reply.includes(f)).length;
   if (verbatim >= 3) return "leak";
+  if (memories.filter((m) => m.length >= 4 && reply.includes(m)).length >= 3) return "leak";
   if (!boundaries.current_location) {
     // 지금 · 사는 곳을 말하는 문장
     if (/((지금|현재)\s*[^\s.,!?]{1,12}\s*(에|에서)\s*(있|왔|와\s*있)|(사는\s*곳|집)\s*(은|는|이)\s*[가-힣]{2,}|\d+\s*(번지|호))/.test(reply)) return "current_location";
+    // 기록 속 과거 장소를 "지금 거기 있다"로 바꿔 말하는 문장 (지금 + 장소 + 진행형)
+    const placeParts = places.flatMap((p) => p.split(/[·,/]/)).map((p) => p.trim()).filter((p) => p.length >= 2);
+    const mentionsPlace = (s: string) =>
+      PLACE_HERE.test(s) || placeParts.some((p) => s.includes(p)) || (s.match(PLACE_TOKEN) ?? []).some((p) => !NOT_PLACE.test(p) && !notPlaceForm(p, ""));
+    // "지금" 없이도: 장소 + 현재 진행형 = 지금 거기 있다는 말 (과거형 "중이었어", "하고 있었어"는 허용)
+    if (reply.split(/(?<=[.!?~\n])\s*/).some((s) => PRESENT_AT.test(s) && mentionsPlace(s))) {
+      return "current_location";
+    }
     // 근거(기록 · 사실 · 대화)에 없는 장소 이름 — 추측으로 만든 위치
     if (unknownPlaces(reply, groundText).length) return "current_location";
   }
@@ -105,6 +139,24 @@ export function postcheck({ reply, boundaries, facts, groundText }: PostcheckInp
 }
 
 /** 모델을 쓰지 못하거나 검사에 걸렸을 때의 고정 거절 (말투만 맞춘다) */
+/**
+ * 후(post) 검사에 걸렸을 때의 답.
+ * 팬이 위치를 묻지 않았는데 모델 답이 current_location에 걸린 경우(예: "오늘 하루 어땠어?"에 기록 속 장소를 현재형으로 말함)는
+ * 위치 전용 거절문 대신 중립 문장 — 새 사실 · 위치 암시 · 감정 · 본인 사칭 없이, 말투(존댓말 · ㅋㅋ)만 맞춘다. 추가 모델 호출 없음.
+ * 직접적인 현재 위치 질문이면 기존 위치 거절 그대로.
+ */
+export function postFallbackReply(
+  topic: GuardTopic | "leak" | "impersonation",
+  opts: { message: string; formality: Formality; laughKk: boolean; creatorName: string },
+): string {
+  if (topic === "current_location" && !isCurrentLocationQuestion(opts.message)) {
+    return opts.formality === "polite"
+      ? "오늘 기록에 있는 내용까지만 이야기할게요. 더 궁금한 순간이 있으면 물어봐 주세요!"
+      : `오늘 기록에 있는 내용까지만 이야기할게${opts.laughKk ? " ㅋㅋ" : "."} 더 궁금한 순간 있으면 물어봐!`;
+  }
+  return fallbackReply(topic, opts.formality, opts.creatorName);
+}
+
 export function fallbackReply(topic: GuardTopic | "leak" | "impersonation", formality: Formality, creatorName: string): string {
   const polite = formality === "polite";
   switch (topic) {

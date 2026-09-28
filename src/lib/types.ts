@@ -126,12 +126,11 @@ export interface ChatThread {
   unread: number;
 }
 
-export type FanMemoryCategory = "호칭" | "관심사" | "기억할 일" | "대화 요약";
-
+/** Fan Memory — 팬 본인만 보고 지울 수 있다 (크리에이터는 볼 수 없다) */
 export interface FanMemoryItem {
   id: string;
   creatorId: string;
-  category: FanMemoryCategory;
+  category: import("./fanMemory").MemoryCategory;
   content: string;
   createdAt: string;
 }

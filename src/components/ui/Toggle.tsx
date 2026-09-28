@@ -66,7 +66,7 @@ export function ToggleRow({
     <div className="flex items-start gap-4 px-4 py-4">
       <div className="min-w-0 flex-1">
         <div className="text-body font-medium">{title}</div>
-        {description && <p className="mt-0.5 text-caption leading-relaxed text-muted">{description}</p>}
+        {description && <p className="mt-0.5 break-keep text-caption leading-relaxed text-muted">{description}</p>}
       </div>
       <Toggle defaultOn={defaultOn} checked={checked} disabled={disabled} locked={locked} label={title} onChange={onChange} />
     </div>

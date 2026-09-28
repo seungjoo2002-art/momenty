@@ -559,6 +559,163 @@ console.log("\nv0.5 · 회귀 B — 호출자가 rate limit 값을 정하려는 
   await db.exec(`update private.ai_settings set rate_per_creator = 20, rate_per_user = 60, rate_window_sec = 600`);
 }
 
+/* ======================= v0.6 Fan Memory ======================= */
+console.log("\nv0.6 · Fan Memory 설정 (팬 본인만)");
+{
+  const setSql = `insert into public.fan_ai_settings (fan_id, memory_enabled) values ($1, $2)`;
+  check("다른 팬의 설정 행 생성 → RLS 거부", await failsWith(U.premium, setSql, [U.subscriber, true], /row-level security/));
+  check("비로그인 설정 조회 → 거부", await fails(null, `select * from public.fan_ai_settings`));
+  check("본인 설정 생성 (OFF로 시작)", !(await fails(U.subscriber, setSql, [U.subscriber, false])));
+  check("다른 팬은 내 설정을 읽을 수 없음", (await count(U.premium, `select * from public.fan_ai_settings`)) === 0);
+  check("크리에이터도 팬 설정을 읽을 수 없음", (await count(U.creatorA, `select * from public.fan_ai_settings`)) === 0);
+  check("다른 팬이 내 설정 켜기 → 0행", (await as(U.premium, `update public.fan_ai_settings set memory_enabled = true where fan_id = $1 returning 1`, [U.subscriber])).rows.length === 0);
+  check("fan_id 바꾸기 → 거부 (컬럼 권한)", await fails(U.subscriber, `update public.fan_ai_settings set fan_id = $1`, [U.premium]));
+  const d = (await db.query(`select column_default from information_schema.columns where table_schema = 'public' and table_name = 'fan_ai_settings' and column_name = 'memory_enabled'`)).rows[0];
+  check("기본값 OFF (팬이 켜야 기억)", d?.column_default === "false", JSON.stringify(d));
+}
+
+console.log("\nv0.6 · Fan Memory 저장 (record_fan_memories만)");
+const recMem = `select public.record_fan_memories($1, $2, $3::jsonb, $4::uuid) as r`;
+const ctxMem = `select public.ai_fan_memory_context($1, $2, $3::text[], $4) as r`;
+const memItems = (...xs) => JSON.stringify(xs.map(([category, content]) => ({ category, content })));
+{
+  check("팬이 fan_memories 직접 insert → permission denied",
+    await failsWith(U.subscriber, `insert into public.fan_memories (fan_id, creator_id, category, content) values ($1, 'c1', 'favorite', '초밥')`, [U.subscriber], /permission denied/));
+  check("서버 키 없이 저장 → server_key_required", await failsWith(U.subscriber, recMem, [null, "c1", memItems(["favorite", "초밥"]), null], /server_key_required/));
+  check("무료 팔로워 저장 → subscription_required", await failsWith(U.follower, recMem, [KEY, "c1", memItems(["favorite", "초밥"]), null], /subscription_required/));
+  check("크리에이터 본인 채널 → own_channel", await failsWith(U.creatorA, recMem, [KEY, "c1", memItems(["favorite", "초밥"]), null], /own_channel/));
+  check("비로그인 → 실행 권한 없음", await failsWith(null, recMem, [KEY, "c1", memItems(["favorite", "초밥"]), null], /permission denied/));
+
+  // F(저장). Memory OFF → 새로 기억하지 않음
+  const off = (await as(U.subscriber, recMem, [KEY, "c1", memItems(["favorite", "초밥 좋아함"]), null])).rows[0].r;
+  check("F. Memory OFF → 저장하지 않음 (saved 0)", off.enabled === false && off.saved === 0 && (await db.query(`select 1 from public.fan_memories`)).rows.length === 0, JSON.stringify(off));
+
+  await as(U.subscriber, `update public.fan_ai_settings set memory_enabled = true where fan_id = $1`, [U.subscriber]);
+  const fanMsg = (await db.query(
+    `select m.id from public.ai_messages m join public.ai_conversations c on c.id = m.conversation_id where c.fan_id = $1 and c.creator_id = 'c1' and m.sender = 'fan' limit 1`, [U.subscriber])).rows[0].id;
+  const on = (await as(U.subscriber, recMem, [KEY, "c1", memItems(["nickname", "민지라고 불러줘"], ["schedule", "10월에 오사카 여행 예정"], ["favorite", "초밥을 좋아함"]), fanMsg])).rows[0].r;
+  check("Memory ON → 3개 저장", on.enabled === true && on.saved === 3, JSON.stringify(on));
+  const dup = (await as(U.subscriber, recMem, [KEY, "c1", memItems(["favorite", "  초밥을   좋아함 "]), null])).rows[0].r;
+  check("같은 내용(앞뒤 · 중복 공백 차이)은 중복 저장하지 않음", dup.saved === 0 && dup.skippedDuplicate === 1, JSON.stringify(dup));
+
+  check("항목 4개 → 거부", await failsWith(U.subscriber, recMem, [KEY, "c1", memItems(["other", "a"], ["other", "b"], ["other", "c"], ["other", "d"]), null], /invalid memory items/));
+  check("J. 정의 밖 category(creator_fact) → 거부", await failsWith(U.subscriber, recMem, [KEY, "c1", memItems(["creator_fact", "하늘은 초밥을 좋아함"]), null], /invalid memory items/));
+  check("201자 → 거부", await failsWith(U.subscriber, recMem, [KEY, "c1", memItems(["other", "가".repeat(201)]), null], /invalid memory items/));
+  check("배열이 아닌 값 → 거부", await failsWith(U.subscriber, recMem, [KEY, "c1", JSON.stringify({ category: "other", content: "x" }), null], /invalid memory items/));
+  check("K. 다른 팬(Premium)이 남의 메시지를 근거로 → 거부",
+    await failsWith(U.premium, recMem, [KEY, "c1", memItems(["other", "산책을 좋아함"]), fanMsg], /invalid source message/));
+}
+
+console.log("\nv0.6 · H. 민감정보는 자동 저장하지 않음");
+{
+  const sensitive = [
+    ["other", "요즘 우울증 때문에 정신과 다녀"], ["other", "당뇨가 있어서 약을 먹어"], ["other", "성생활 고민이 있어"],
+    ["other", "우리 집 주소는 마포구 월드컵로 123"], ["other", "101동 1203호 살아"], ["other", "카드 번호 1234-5678"],
+    ["other", "비밀번호는 hunter2야"], ["other", "주민번호 900101-1234567"], ["other", "나는 민주당 지지해"],
+    ["other", "매주 교회 예배 가"], ["other", "전과가 있어"], ["other", "연봉이 4천이야"], ["other", "내 번호 010-1234-5678"],
+  ];
+  let stored = 0;
+  let skipped = 0;
+  for (let i = 0; i < sensitive.length; i += 3) {
+    const r = (await as(U.subscriber, recMem, [KEY, "c1", memItems(...sensitive.slice(i, i + 3)), null])).rows[0].r;
+    stored += r.saved;
+    skipped += r.skippedSensitive;
+  }
+  check(`민감정보 ${sensitive.length}종 → 전부 건너뜀 (저장 0)`, stored === 0 && skipped === sensitive.length, JSON.stringify({ stored, skipped }));
+  const safe = (await as(U.subscriber, recMem, [KEY, "c1", memItems(["interest", "게이머라서 주말엔 게임해"], ["favorite", "고소한 라떼를 좋아함"]), null])).rows[0].r;
+  check("비슷해 보이는 일상 표현(게이머 · 고소한)은 저장", safe.saved === 2, JSON.stringify(safe));
+  // 함수를 거치지 않는 경로도 테이블 제약이 막는다 (superuser 직접 insert)
+  let blocked = false;
+  try {
+    await db.query(`insert into public.fan_memories (fan_id, creator_id, category, content) values ($1, 'c1', 'other', '공황장애가 있어')`, [U.subscriber]);
+  } catch {
+    blocked = true;
+  }
+  check("테이블 제약: 민감정보 직접 insert → 거부", blocked);
+}
+
+console.log("\nv0.6 · Fan Memory 조회 · 격리");
+{
+  check("팬 본인은 자기 Memory를 읽음 (5개)", (await count(U.subscriber, `select * from public.fan_memories`)) === 5);
+  check("A. 다른 팬은 0개", (await count(U.premium, `select * from public.fan_memories`)) === 0);
+  check("D. 크리에이터(c1 본인)도 팬 Memory 원문을 읽을 수 없음", (await count(U.creatorA, `select * from public.fan_memories`)) === 0);
+  check("비로그인 조회 → 거부", await fails(null, `select * from public.fan_memories`));
+  const one = (await db.query(`select id from public.fan_memories where content = '초밥을 좋아함'`)).rows[0].id;
+  check("B. 다른 팬이 수정 → permission denied", await failsWith(U.premium, `update public.fan_memories set content = 'x' where id = $1`, [one], /permission denied/));
+  check("B. 본인도 직접 수정 불가 (저장은 서버 함수만)", await failsWith(U.subscriber, `update public.fan_memories set content = '크리에이터는 초밥을 좋아함' where id = $1`, [one], /permission denied/));
+  check("C. 다른 팬이 삭제 → 0행", (await as(U.premium, `delete from public.fan_memories where id = $1 returning 1`, [one])).rows.length === 0);
+  check("C. 크리에이터가 삭제 → 0행", (await as(U.creatorA, `delete from public.fan_memories returning 1`)).rows.length === 0);
+  check("D. 크리에이터는 Memory Context 함수도 못 씀 (own_channel)", await failsWith(U.creatorA, ctxMem, [KEY, "c1", [], 6], /own_channel/));
+  check("다른 팬(Premium)의 Context에는 내 Memory 없음", ((await as(U.premium, ctxMem, [KEY, "c1", ["초밥"], 8])).rows[0].r.items ?? []).length === 0);
+}
+
+console.log("\nv0.6 · ai_fan_memory_context");
+{
+  check("서버 키 없이 → server_key_required", await failsWith(U.subscriber, ctxMem, [null, "c1", [], 6], /server_key_required/));
+  check("무료 팔로워 → subscription_required", await failsWith(U.follower, ctxMem, [KEY, "c1", [], 6], /subscription_required/));
+  const r = (await as(U.subscriber, ctxMem, [KEY, "c1", ["오사카", "여행"], 2])).rows[0].r;
+  check("관련 Memory(오사카)가 먼저 · 요청한 개수만", r.enabled && r.items.length === 2 && r.items[0].content === "10월에 오사카 여행 예정", JSON.stringify(r));
+  check("항목에는 category · content만 (id · 시각 · 근거 메시지 없음)", Object.keys(r.items[0]).sort().join() === "category,content");
+  const all = (await as(U.subscriber, ctxMem, [KEY, "c1", [], 1000])).rows[0].r;
+  check("I. p_limit 1000 → 최대 8개로 제한 (현재 5개 전부)", all.items.length === 5, String(all.items.length));
+  const many = [];
+  for (let i = 0; i < 12; i++) many.push(["other", `취미 메모 ${i}`]);
+  for (let i = 0; i < many.length; i += 3) await as(U.subscriber, recMem, [KEY, "c1", memItems(...many.slice(i, i + 3)), null]);
+  const capped = (await as(U.subscriber, ctxMem, [KEY, "c1", [], 1000])).rows[0].r;
+  check("I. Memory 17개여도 Context는 최대 8개 (전체 dump 불가)", capped.items.length === 8, String(capped.items.length));
+  const pinned = (await as(U.subscriber, ctxMem, [KEY, "c1", [], 3])).rows[0].r;
+  check("관련 검색어가 없으면 호칭이 먼저", pinned.items[0].category === "nickname", JSON.stringify(pinned.items));
+  const junk = (await as(U.subscriber, ctxMem, [KEY, "c1", Array(500).fill("x".repeat(500)), 6])).rows[0].r;
+  check("I. 검색어 500개 · 긴 검색어 → 무시하고 정상 동작", junk.enabled && junk.items.length === 6);
+  await db.exec(`delete from public.fan_memories where content like '취미 메모 %'`);
+
+  // E. 다른 크리에이터 AI
+  await db.exec(`insert into public.creator_personas (creator_id) values ('c2')`);
+  await db.query(`insert into public.subscriptions (fan_id, creator_id, tier) values ($1, 'c2', 'subscriber') on conflict (fan_id, creator_id) do update set tier = 'subscriber'`, [U.subscriber]);
+  const c2 = (await as(U.subscriber, ctxMem, [KEY, "c2", ["오사카", "초밥"], 8])).rows[0].r;
+  check("E. 다른 크리에이터(c2) AI Context에는 c1 Memory 없음", c2.enabled === true && c2.items.length === 0, JSON.stringify(c2));
+  await as(U.subscriber, recMem, [KEY, "c2", memItems(["favorite", "c2 전용 메모"]), null]);
+  const c1 = (await as(U.subscriber, ctxMem, [KEY, "c1", ["c2"], 8])).rows[0].r;
+  check("E. c2에서 생긴 Memory는 c1 AI Context에 없음", !c1.items.some((i) => i.content === "c2 전용 메모"), JSON.stringify(c1.items));
+
+  // G. 삭제된 Memory
+  check("팬 본인 개별 삭제 → 1행", (await as(U.subscriber, `delete from public.fan_memories where content = '10월에 오사카 여행 예정' returning 1`)).rows.length === 1);
+  const afterDel = (await as(U.subscriber, ctxMem, [KEY, "c1", ["오사카"], 8])).rows[0].r;
+  check("G. 삭제한 Memory는 Context에 다시 나오지 않음", !afterDel.items.some((i) => i.content.includes("오사카")), JSON.stringify(afterDel.items));
+
+  // F. OFF → Context에 쓰지 않음 · 기존 Memory는 남아 있음
+  await as(U.subscriber, `update public.fan_ai_settings set memory_enabled = false where fan_id = $1`, [U.subscriber]);
+  const offCtx = (await as(U.subscriber, ctxMem, [KEY, "c1", ["초밥"], 8])).rows[0].r;
+  check("F. Memory OFF → Context 비어 있음", offCtx.enabled === false && offCtx.items.length === 0, JSON.stringify(offCtx));
+  check("F. OFF여도 기존 Memory는 자동 삭제되지 않음 (팬이 볼 수 있음)", (await count(U.subscriber, `select * from public.fan_memories`)) > 0);
+  await as(U.subscriber, `update public.fan_ai_settings set memory_enabled = true where fan_id = $1`, [U.subscriber]);
+
+  // K. Conversation과 Memory는 서로 다른 권한 · 수명
+  check("K. 크리에이터 본인은 여전히 팬 AI 대화 원문을 읽을 수 없음", (await count(U.creatorA, `select * from public.ai_messages`)) === 0);
+  const before = Number((await db.query(`select count(*)::int as n from public.fan_memories where fan_id = $1 and creator_id = 'c1'`, [U.subscriber])).rows[0].n);
+  const convDel = (await as(U.subscriber, `delete from public.ai_conversations where creator_id = 'c1' returning 1`)).rows.length;
+  const after = Number((await db.query(`select count(*)::int as n from public.fan_memories where fan_id = $1 and creator_id = 'c1'`, [U.subscriber])).rows[0].n);
+  const srcNull = (await db.query(`select bool_and(source_message_id is null) as ok from public.fan_memories where fan_id = $1`, [U.subscriber])).rows[0].ok;
+  check("K. 대화를 지워도 Memory는 따로 남음 (근거 메시지 링크만 끊김)", convDel === 1 && before === after && after > 0 && srcNull === true, JSON.stringify({ convDel, before, after }));
+
+  // 크리에이터별 · 전체 삭제
+  check("크리에이터별 삭제 (c2)", (await as(U.subscriber, `delete from public.fan_memories where creator_id = 'c2' returning 1`)).rows.length === 1);
+  check("전체 삭제", (await as(U.subscriber, `delete from public.fan_memories returning 1`)).rows.length === after && (await count(U.subscriber, `select * from public.fan_memories`)) === 0);
+
+  // 50개 한도
+  await db.exec(`insert into public.fan_memories (fan_id, creator_id, category, content) select '${U.subscriber}', 'c1', 'other', '메모 ' || g from generate_series(1, 49) g`);
+  const lim = (await as(U.subscriber, recMem, [KEY, "c1", memItems(["other", "50번째"], ["other", "51번째"]), null])).rows[0].r;
+  check("fan × creator 50개까지 (51번째 건너뜀)", lim.saved === 1 && lim.skippedLimit === 1, JSON.stringify(lim));
+  await db.exec(`delete from public.fan_memories`);
+
+  // L. 모든 경로가 authenticated 역할(팬 JWT) + 서버 키로 동작 — service role 불필요
+  const grants = (await db.query(
+    `select routine_name, grantee from information_schema.routine_privileges where routine_name in ('ai_fan_memory_context', 'record_fan_memories', 'fan_memory_sensitive') and grantee in ('anon', 'authenticated', 'PUBLIC')`)).rows;
+  check("L. 함수 실행 권한: authenticated만 (anon · PUBLIC 없음 · 민감정보 판정 함수는 비공개)",
+    grants.length === 2 && grants.every((g) => g.grantee === "authenticated" && g.routine_name !== "fan_memory_sensitive"), JSON.stringify(grants));
+  check("L. 팬이 민감정보 판정 함수를 직접 호출 → permission denied", await failsWith(U.subscriber, `select public.fan_memory_sensitive('x')`, [], /permission denied/));
+}
+
 console.log("\nCascade");
 await as(U.premium, react, [M.prem, U.premium]);
 await as(U.creatorA, `delete from public.moments where id = $1`, [M.prem]);

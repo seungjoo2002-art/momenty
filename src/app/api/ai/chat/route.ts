@@ -7,11 +7,13 @@
  *                  (존재 · 본인 채널 아님 · Persona ON · 설정됨 · subscriber/premium)
  *   4. 횟수 제한    consume_ai_rate_limit(서버 키, creatorId) — Postgres 공유 카운터    429
  *   5. Context     팬 세션 + RLS로 볼 수 있고 AI 참고 허용된 오늘 Moment · focus Moment · 최근 대화
+ *                  + Fan Memory(ai_fan_memory_context — 팬이 켰을 때만, 이 크리에이터 AI에 대한 것만, 최대 6개)
  *   6. 경계(전)    팬 메시지 주제 검사 → 막힌 주제면 거절 모드 (Today · 사실 제외)
  *   7. Prompt      SYSTEM → STYLE → PERSONALITY → FACTS → BOUNDARIES → TODAY → FAN → CONVERSATION → USER
  *   8. Provider    (설정되어 있으면) LLM 호출
  *   9. 경계(후)    위치 · 만남 · 유출 · 사칭 검사 → 걸리면 고정 거절 문장
  *  10. 저장        record_ai_exchange(서버 키, …) — 근거 Moment는 DB가 다시 검증
+ *  11. Memory     (켜져 있으면) 팬이 자기에 대해 말한 것 → 서버 필터 → record_fan_memories (DB가 ON · 민감정보 재확인)
  *
  * 팬 메시지 내용은 1~5단계에 쓰이지 않는다 → prompt injection으로 권한 · 데이터 범위가 바뀌지 않는다.
  * service role은 쓰지 않는다 — 팬의 JWT + AI_SERVER_KEY.
@@ -22,8 +24,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import { auditAi, type AiAuditEvent, type AiResponseMeta } from "@/lib/ai/audit";
 import { AiConfigError, getAiServerKey } from "@/lib/ai/config";
 import { contextTypesOf, createContextBuilder, loadPersona, loadRecentConversation, PersonaAccessError, type PersonaDenial } from "@/lib/ai/context";
-import { fallbackReply, postcheck, precheck, type GuardTopic } from "@/lib/ai/guard";
+import { fallbackReply, postcheck, postFallbackReply, precheck, type GuardTopic } from "@/lib/ai/guard";
 import { buildPersonaPrompt, CONVERSATION_WINDOW, parseModelOutput } from "@/lib/ai/prompt";
+import { filterMemoryCandidates, loadFanMemory, saveFanMemories, type FanMemoryContext } from "@/lib/ai/memory";
 import { getPersonaProvider, ProviderError } from "@/lib/ai/provider";
 import { aiRateLimiter } from "@/lib/ai/rateLimit";
 import { aiChatRequestSchema } from "@/lib/ai/schema";
@@ -122,7 +125,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 5. Context (팬 세션 + RLS)
-    const [ctx, conversation] = await Promise.all([
+    const [ctx, conversation, fanMemory] = await Promise.all([
       createContextBuilder(sb, persona.creator).build({
         creatorId: persona.creator.id,
         fanId: user.id,
@@ -130,6 +133,11 @@ export async function POST(req: NextRequest) {
         focusMomentId: input.momentId,
       }),
       loadRecentConversation(sb, user.id, persona.creator.id, CONVERSATION_WINDOW),
+      // Memory를 못 읽으면 "꺼짐"과 같게 (답은 계속 — Memory 없이)
+      loadFanMemory(sb, serverKey, persona.creator.id, input.message).catch((e): FanMemoryContext => {
+        console.error("[momenty/ai] fan memory load failed", requestId, e instanceof Error ? e.name : "unknown");
+        return { enabled: false, items: [] };
+      }),
     ]);
 
     // 6. 경계(전)
@@ -144,7 +152,9 @@ export async function POST(req: NextRequest) {
       userMessage: input.message,
       declineTopic,
       nowLabel: KST_TIME.format(new Date()),
+      fanMemory,
     });
+    const memoryUsed = declineTopic ? [] : fanMemory.items;
     const contextTypes = declineTopic
       ? (["style", "personality", "boundaries"] as const)
       : ([
@@ -153,6 +163,7 @@ export async function POST(req: NextRequest) {
           ...(persona.facts.length ? (["facts"] as const) : []),
           "boundaries",
           ...contextTypesOf(ctx).filter((t): t is "today" | "focus" => t === "today" || t === "focus"),
+          ...(memoryUsed.length ? (["fan_memory"] as const) : []),
           ...(conversation.length ? (["conversation"] as const) : []),
         ] as const);
 
@@ -167,6 +178,8 @@ export async function POST(req: NextRequest) {
         momentIds: declineTopic ? [] : [...prompt.momentAliases.values()],
         focusMomentId: declineTopic ? null : (ctx.focus?.id ?? null),
       },
+      guard: declineTopic ? { stage: "pre", topic: declineTopic } : null,
+      memory: { enabled: fanMemory.enabled, used: memoryUsed.length, saved: 0 },
     };
 
     // 8. Provider
@@ -182,6 +195,7 @@ export async function POST(req: NextRequest) {
     let replyText: string;
     let groundedIds: string[] = [];
     let boundary: string | null = declineTopic;
+    let memoryCandidates: unknown[] = [];
     try {
       const out = await provider.generatePersonaReply({ system: prompt.system, messages: prompt.messages, maxTokens: prompt.maxTokens, requestId });
       if (out.refused) {
@@ -191,6 +205,7 @@ export async function POST(req: NextRequest) {
         const parsedOut = parseModelOutput(out.text, prompt.momentAliases);
         replyText = parsedOut.reply;
         groundedIds = declineTopic ? [] : parsedOut.momentIds;
+        memoryCandidates = parsedOut.memories;
       }
       meta.generated = true;
       meta.provider = out.provider;
@@ -206,16 +221,19 @@ export async function POST(req: NextRequest) {
     // 9. 경계(후) — 걸리면 모델의 답은 버린다
     // 모델이 본 근거 원문 — 여기 없는 장소 이름은 추측으로 본다
     const groundText = [
-      ...(declineTopic ? [] : ctx.today.items.map((m) => m.content)),
-      ...(declineTopic || !ctx.focus ? [] : [ctx.focus.content]),
+      ...(declineTopic ? [] : ctx.today.items.flatMap((m) => [m.content, m.location ?? ""])),
+      ...(declineTopic || !ctx.focus ? [] : [ctx.focus.content, ctx.focus.location ?? ""]),
       ...persona.facts.map((f) => f.content),
       ...conversation.map((t) => t.content),
+      ...memoryUsed.map((m) => m.content),
       input.message,
     ].join("\n");
-    const violation = postcheck({ reply: replyText, boundaries: persona.boundaries, creatorName: persona.creator.name, facts: persona.facts.map((f) => f.content), groundText });
+    const violation = postcheck({ reply: replyText, boundaries: persona.boundaries, creatorName: persona.creator.name, facts: persona.facts.map((f) => f.content), groundText, places: declineTopic ? [] : [...ctx.today.items, ...(ctx.focus ? [ctx.focus] : [])].flatMap((m) => (m.location ? [m.location] : [])), memories: memoryUsed.map((m) => m.content) });
     if (violation || !replyText.trim()) {
       const topic = violation ?? "leak";
-      replyText = fallbackReply(topic, persona.style.formality, persona.creator.name);
+      replyText = postFallbackReply(topic, { message: input.message, formality: persona.style.formality, laughKk: persona.style.laughKk, creatorName: persona.creator.name });
+      meta.guard = { stage: "post", topic };
+      memoryCandidates = [];
       groundedIds = [];
       boundary = topic === "leak" || topic === "impersonation" ? boundary : topic;
     }
@@ -236,7 +254,19 @@ export async function POST(req: NextRequest) {
     if (saveError) throw saveError;
     meta.context.momentIds = (saved as { groundedMomentIds: string[] }).groundedMomentIds;
 
-    auditAi({ event: "ai_chat", requestId, outcome: "ok", status: 200, creatorId: persona.creator.id, messageLength: input.message.length, contextTypes: meta.context.types, contextCount: meta.context.momentIds.length });
+    // 11. Fan Memory — 켜져 있고, 거절 모드 · 가드 개입이 아닐 때만. 실패해도 답은 그대로 (이미 저장됨)
+    if (fanMemory.enabled && !declineTopic) {
+      const items = filterMemoryCandidates(memoryCandidates, persona.creator.name);
+      if (items.length) {
+        try {
+          meta.memory.saved = await saveFanMemories(sb, serverKey, persona.creator.id, items, (saved as { fanMessageId: string }).fanMessageId);
+        } catch (e) {
+          console.error("[momenty/ai] fan memory save failed", requestId, e instanceof Error ? e.name : "unknown");
+        }
+      }
+    }
+
+    auditAi({ event: "ai_chat", requestId, outcome: "ok", status: 200, creatorId: persona.creator.id, messageLength: input.message.length, contextTypes: meta.context.types, contextCount: meta.context.momentIds.length, guard: meta.guard ? `${meta.guard.stage}:${meta.guard.topic}` : undefined, memoryUsed: meta.memory.used, memorySaved: meta.memory.saved });
     return NextResponse.json(
       {
         ok: true,
