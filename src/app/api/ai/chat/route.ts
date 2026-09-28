@@ -45,6 +45,7 @@ const MESSAGES = {
   persona_not_configured: "이 크리에이터의 Creator AI가 아직 준비되지 않았어요.",
   own_channel: "내 채널의 Creator AI와는 대화할 수 없어요.",
   subscription_required: "Creator AI 대화는 구독자에게 열려요.",
+  blocked: "지금은 이 크리에이터와 대화할 수 없어요.",
   rate_limited: "잠시 후 다시 시도해 주세요.",
   ai_unavailable: "Creator AI가 잠시 답할 수 없어요. 잠시 후 다시 시도해 주세요.",
   error: "잠시 후 다시 시도해 주세요.",

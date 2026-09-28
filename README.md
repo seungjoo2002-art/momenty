@@ -4,7 +4,7 @@
 오늘의 기록을 바탕으로 한 **Creator AI(Persona)**, 그리고 때때로 **실제 크리에이터(Human)**와 대화합니다.
 
 > 현재 단계(v0.4): 실제 가입 사용자가 Fan / Creator로 사용하는 앱. Supabase Auth · Postgres(RLS) · Storage 기반.
-> Creator AI(Persona, v0.5-2) · Fan Memory(v0.6)는 열려 있다. AI Fan Manager · 결제는 아직 열지 않았다 — 화면에서는 "준비 중"으로 보인다.
+> Creator AI(Persona, v0.5-2) · Fan Memory(v0.6) · Fan Manager + 크리에이터 직접 메시지(v0.7)는 열려 있다. 결제는 아직 열지 않았다 — 화면에서는 "준비 중"으로 보인다.
 
 ## 실행
 
@@ -129,6 +129,7 @@ npx supabase db push          # supabase/migrations 를 순서대로 적용
 4. `supabase/migrations/20260927030000_v04_auth_profiles_media.sql` — v0.4: 컬럼 단위 쓰기 권한, 미디어 경로 검증 trigger, 무료 팔로우, 팔로워 수 집계, avatars bucket · 파일 형식/크기 제한, 보관함, orphan 파일 조회 함수.
 5. `supabase/migrations/20260928000000_v05_persona_chat.sql` — v0.5-2: Persona · 사실 · 경계 · AI 대화 · 서버 키 함수 · 공유 rate limit. 적용 후 `insert into private.server_keys (id, key_hash) values ('ai', encode(sha256('<AI_SERVER_KEY>'), 'hex'))` 로 서버 키 해시를 등록한다.
 6. `supabase/migrations/20260928120000_v06_fan_memory.sql` — v0.6: Fan Memory (`fan_ai_settings` · `fan_memories` · 민감정보 판정 · `ai_fan_memory_context` · `record_fan_memories`).
+7. `supabase/migrations/20260929000000_v07_fan_manager_human_chat.sql` — v0.7: Human Chat · 차단 · 신고 · 크리에이터 메모 · 팬 공유 · Fan Manager 함수 · Realtime publication.
 
 ### 3. 개발용 seed (선택)
 
@@ -196,6 +197,8 @@ npm run test:unit                                   # LLM · DB 없이: 경계 �
 npm run build && npm run test:llm-hardening -- --confirm-dev  # 실제 호출 3회: 1인칭 · ㅎㅎ 금지 · 과거 장소는 과거형으로
 npm run build && npm run test:llm-memory -- --confirm-dev     # 실제 호출 약 9회: Fan Memory 추출 · 회상 · 격리 · OFF · 삭제 · 민감정보 · dump
 npm run build && npm run test:core-loop -- --confirm-dev      # 실제 Chrome + Supabase + Anthropic(2회): Moment 작성 → Today → 상세 → AI → Memory → 재로그인 → 삭제
+npm run test:human-live -- --confirm-dev                      # v0.7 실제 프로젝트: Human Chat · 격리 · 위조 · 메모 · 공유 · 차단 · 신고 · Realtime (LLM 없음)
+npm run build && npm run test:human-e2e -- --confirm-dev      # v0.7 Chrome 두 브라우저: Fan Manager → 직접 메시지 실시간 → 공유 · 신고 · 차단 · 구독 종료 (LLM 없음)
 npm run db:cleanup-media -- --dry-run --confirm-dev # 참조 없는 업로드 파일 찾기 (--dry-run 빼면 삭제)
 ```
 
@@ -249,6 +252,22 @@ Fan Memory는 "지금 대화하는 팬에 관한" 관계 맥락(호칭 · 관심
 | 민감정보 | 건강 · 정신건강 · 성 · 주소/연락처 · 금융/인증정보 · 식별번호 · 정치 · 종교 · 범죄 등은 서버 필터 + DB 함수 + 테이블 제약에서 저장하지 않는다 |
 | 추출 | 같은 모델 호출의 structured output `memories`(최대 3개) → 서버 필터(형식 · 민감 · 크리에이터 이름 · 중복) → DB 재검증. 거절 모드 · 가드 개입 시에는 저장하지 않는다 |
 | 표시 | 기억한 답 아래 작은 "· 기억했어요"(→ My > AI Memory) |
+
+### Fan Manager + 크리에이터 직접 메시지 (v0.7)
+
+AI가 크리에이터를 대신하는 것이 아니라, 필요할 때 실제 크리에이터가 관계에 참여하는 경로다.
+
+| 항목 | 내용 |
+|---|---|
+| Human Chat | `human_conversations` · `human_messages` — AI 대화와 다른 테이블 · 다른 권한. 두 참여자만 읽는다. 보내기는 `send_message_to_creator`(팬) · `send_message_to_fan`(크리에이터)만 — 보낸 사람 · 대화방은 로그인 세션으로 DB가 정한다(위조할 인자가 없다). AI 경로는 Human 메시지를 만들 수 없다 |
+| 대상 | subscriber · premium만 (무료 팔로워 불가). 크리에이터가 먼저 보낼 수 있다. 구독이 끝나면 기록은 읽고 새 메시지는 불가 |
+| 표시 | 한 대화방에서 시간순으로 보이되: 🤖 {이름} AI("AI가 생성한 답변입니다 · 본인이 아니에요") vs ✓ {이름}("크리에이터가 직접 보낸 메시지"). 입력창에서 받는 사람을 먼저 고른다 |
+| 읽음 | 본인 읽음 시각만 저장 · 상대에게 보이지 않음 (크리에이터 답장 압박 없음) |
+| Realtime | `human_messages` INSERT를 postgres_changes로 — RLS가 적용되어 참여자에게만. 연결 순간 한 번 다시 읽어 빈틈을 메운다 |
+| Fan Manager | `/studio/fans` — `fan_manager_list`(오늘 확인할 팬 · 구독 중인 팬 커서) · `fan_manager_fan`. 점수 · 순위 · 감정 추정 없음. 규칙 6개(답장 대기 · 팬이 공유한 날 · 새 구독 · 최근 반응 · 오랜 공백 · 첫 대화 전)와 관찰된 사실 문장만 |
+| 메모 | `creator_fan_notes` — 크리에이터만. 팬 · Persona AI는 읽지 않는다 |
+| 팬 공유 | My > AI Memory에서 항목마다 [공유] → `fan_creator_shares` 사본. `fan_memories`의 크리에이터 권한은 열지 않는다. 취소 = 삭제 |
+| 차단 · 신고 | 차단은 그 쌍의 직접 메시지와 Creator AI 대화를 모두 멈춘다. 신고는 신고한 사람만 볼 수 있다 (운영 화면은 아직 없음) |
 
 AI 키는 `AI_PROVIDER=anthropic` · `AI_API_KEY` · `AI_MODEL` (서버 환경 변수). `src/lib/ai/*`는 `server-only` — Client Component에서 import하면 빌드가 실패한다.
 

@@ -93,6 +93,7 @@ export async function getAiConversations(): Promise<AiConversationSummary[]> {
 export type AiChatErrorCode =
   | "unauthenticated"
   | "subscription_required"
+  | "blocked"
   | "persona_disabled"
   | "persona_not_configured"
   | "own_channel"

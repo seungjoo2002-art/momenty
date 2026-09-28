@@ -1,6 +1,7 @@
-import { ComingSoon } from "@/components/ui/ComingSoon";
+import { FanDetail } from "./FanDetail";
 
-/** AI Fan Manager는 v0.5 이후 */
-export default function FanManagerPage() {
-  return <ComingSoon backHref="/studio/fans" title="팬 관리는 준비 중이에요" description="팬과의 대화 · 기억을 돕는 도구는 Creator AI와 함께 열려요." />;
+/** Creator-safe Fan Profile — 권한은 fan_manager_fan()이 매번 확인한다 (내 채널과 관계있는 팬만) */
+export default async function FanDetailPage(props: PageProps<"/studio/fans/[fanId]">) {
+  const { fanId } = await props.params;
+  return <FanDetail fanId={fanId} />;
 }

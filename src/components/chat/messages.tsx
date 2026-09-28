@@ -10,7 +10,8 @@ import { formatClock, formatTime } from "@/lib/utils/format";
  * 세 종류의 말풍선은 절대 비슷해 보이지 않는다.
  *  - Creator AI : 흰 말풍선 + "🤖 {이름} AI" + "AI" 라벨 (크리에이터 본인의 말이 아니다)
  *  - 팬(나)     : 보라 말풍선, 흰 글자, 오른쪽
- *  - 실제 본인  : 라벤더 말풍선 + 보라 테두리 + "✓ {이름}" + "본인" 라벨, 아바타 보라 링 (Human takeover 단계에서 사용)
+ *  - 실제 본인  : 라벤더 말풍선 + 보라 테두리 + "✓ {이름}" + "본인" 라벨, 아바타 보라 링 + "크리에이터가 직접 보낸 메시지"
+ *  팬이 보낸 말풍선에는 누구에게 보냈는지(🤖 AI에게 / ✓ 이름에게 직접)를 작게 붙인다 — 한 방에 두 흐름이 섞여도 헷갈리지 않게.
  */
 
 export function AIMessage({
@@ -61,7 +62,20 @@ export function AIMessage({
   );
 }
 
-export function CreatorMessage({ creator, text, createdAt }: { creator: Creator; text: string; createdAt: string }) {
+export function CreatorMessage({
+  creator,
+  text,
+  createdAt,
+  onReport,
+  reported = false,
+}: {
+  creator: Pick<Creator, "name" | "avatarUrl">;
+  text: string;
+  createdAt: string;
+  /** 팬이 받은 메시지 신고 */
+  onReport?: () => void;
+  reported?: boolean;
+}) {
   return (
     <div className="flex gap-2 pr-12">
       <Avatar src={creator.avatarUrl} name={creator.name} size="sm" ring="human" />
@@ -74,17 +88,73 @@ export function CreatorMessage({ creator, text, createdAt }: { creator: Creator;
         <div className="rounded-[18px] rounded-tl-[6px] bg-brand-soft px-3.5 py-2.5 text-sub text-ink ring-1 ring-brand/25 ring-inset">
           {text}
         </div>
-        <time className="mt-1 block text-micro text-faint">{formatClock(createdAt)} · 직접 보낸 메시지</time>
+        <div className="mt-1 flex items-center gap-1.5 text-micro text-faint">
+          <time>{formatClock(createdAt)}</time>
+          <span>· 크리에이터가 직접 보낸 메시지</span>
+          {reported ? <span>· 신고함</span> : onReport && (
+            <button type="button" onClick={onReport} className="hover:text-danger">
+              · 신고
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-export function FanMessage({ text, createdAt }: { text: string; createdAt: string }) {
+export function FanMessage({ text, createdAt, to }: { text: string; createdAt: string; /** 누구에게 보낸 메시지인지 (예: "🤖 AI에게", "✓ 지훈에게 직접") */ to?: string }) {
   return (
     <div className="flex flex-col items-end pl-14">
       <div className="rounded-[18px] rounded-tr-[6px] bg-brand px-3.5 py-2.5 text-sub text-white">{text}</div>
-      <time className="mt-1 text-micro text-faint">{formatClock(createdAt)}</time>
+      <time className="mt-1 text-micro text-faint">
+        {to && <span className="mr-1">{to} ·</span>}
+        {formatClock(createdAt)}
+      </time>
+    </div>
+  );
+}
+
+/** (Studio) 크리에이터가 보는 팬의 직접 메시지 — 왼쪽 회색 말풍선 */
+export function FanToCreatorMessage({
+  name,
+  avatarUrl,
+  text,
+  createdAt,
+  onReport,
+  reported = false,
+}: {
+  name: string;
+  avatarUrl?: string | null;
+  text: string;
+  createdAt: string;
+  onReport?: () => void;
+  reported?: boolean;
+}) {
+  return (
+    <div className="flex gap-2 pr-12">
+      <Avatar src={avatarUrl || undefined} name={name} size="sm" />
+      <div className="min-w-0">
+        <p className="mb-1 text-meta text-ink-2">{name}</p>
+        <div className="rounded-[18px] rounded-tl-[6px] bg-surface px-3.5 py-2.5 text-sub text-ink ring-1 ring-line ring-inset">{text}</div>
+        <div className="mt-1 flex items-center gap-1.5 text-micro text-faint">
+          <time>{formatClock(createdAt)}</time>
+          {reported ? <span>· 신고함</span> : onReport && (
+            <button type="button" onClick={onReport} className="hover:text-danger">
+              · 신고
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** (Studio) 크리에이터 본인이 보낸 직접 메시지 — 오른쪽 */
+export function OwnCreatorMessage({ text, createdAt }: { text: string; createdAt: string }) {
+  return (
+    <div className="flex flex-col items-end pl-14">
+      <div className="rounded-[18px] rounded-tr-[6px] bg-brand px-3.5 py-2.5 text-sub text-white">{text}</div>
+      <time className="mt-1 text-micro text-faint">✓ 직접 보냄 · {formatClock(createdAt)}</time>
     </div>
   );
 }

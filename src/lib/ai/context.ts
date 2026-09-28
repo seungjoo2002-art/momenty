@@ -148,7 +148,7 @@ export function contextTypesOf(ctx: PersonaContext): ContextType[] {
 
 /* ---------- Persona (DB 함수 — 서버 키 + 팬 JWT) ---------- */
 
-export type PersonaDenial = "creator_not_found" | "own_channel" | "persona_disabled" | "persona_not_configured" | "subscription_required";
+export type PersonaDenial = "creator_not_found" | "own_channel" | "persona_disabled" | "persona_not_configured" | "subscription_required" | "blocked";
 
 export class PersonaAccessError extends Error {
   constructor(readonly code: PersonaDenial) {
@@ -164,7 +164,7 @@ export class PersonaAccessError extends Error {
 export async function loadPersona(sb: SupabaseClient, serverKey: string, creatorId: string): Promise<import("./prompt").PersonaRecord> {
   const { data, error } = await sb.rpc("ai_persona_context", { p_server_key: serverKey, p_creator_id: creatorId });
   if (error) {
-    const code = (["creator_not_found", "own_channel", "persona_disabled", "persona_not_configured", "subscription_required"] as const).find((c) =>
+    const code = (["creator_not_found", "own_channel", "persona_disabled", "persona_not_configured", "subscription_required", "blocked"] as const).find((c) =>
       error.message.includes(c),
     );
     if (code) throw new PersonaAccessError(code);

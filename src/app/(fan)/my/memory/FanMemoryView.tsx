@@ -9,7 +9,7 @@ import { TopBar } from "@/components/ui/TopBar";
 import { MEMORY_CATEGORY_LABEL } from "@/lib/fanMemory";
 import { useMomentData } from "@/lib/hooks/useMomentData";
 import { getCreators } from "@/lib/services/creators";
-import { deleteFanMemories, getFanMemoryState, setFanMemoryEnabled } from "@/lib/services/fanMemory";
+import { deleteFanMemories, getFanMemoryState, setFanMemoryEnabled, shareMemoryWithCreator, unshareMemory } from "@/lib/services/fanMemory";
 import type { FanMemoryItem } from "@/lib/types";
 import { formatShortDate } from "@/lib/utils/format";
 
@@ -25,6 +25,39 @@ export function FanMemoryView() {
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmAll, setConfirmAll] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  // 크리에이터에게 공유 (팬이 항목마다 직접) — 서버 값 위에 이 화면에서 바꾼 것만
+  const [shareOverride, setShareOverride] = useState<Map<string, boolean>>(new Map());
+  const [sharing, setSharing] = useState<string | null>(null);
+  const [shareDate, setShareDate] = useState("");
+  const isShared = (id: string) => shareOverride.get(id) ?? data?.state.shared.has(id) ?? false;
+
+  async function share(id: string) {
+    setActionError(null);
+    setBusy(`share:${id}`);
+    try {
+      await shareMemoryWithCreator(id, shareDate || null);
+      setShareOverride((m) => new Map(m).set(id, true));
+      setSharing(null);
+      setShareDate("");
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "공유하지 못했어요.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function unshare(id: string) {
+    setActionError(null);
+    setBusy(`share:${id}`);
+    try {
+      await unshareMemory(id);
+      setShareOverride((m) => new Map(m).set(id, false));
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "공유를 취소하지 못했어요.");
+    } finally {
+      setBusy(null);
+    }
+  }
 
   const enabled = enabledOverride ?? data?.state.enabled ?? false;
   const items = useMemo(() => (data?.state.items ?? []).filter((m) => !removed.has(m.id)), [data, removed]);
@@ -84,7 +117,7 @@ export function FanMemoryView() {
             {enabled
               ? "대화 중 내가 말한 호칭 · 관심사 · 일정 같은 것만 기억해요. 건강 · 주소 · 금융 같은 민감한 정보는 기억하지 않아요."
               : "꺼져 있어요. 새로 기억하지 않고, 저장된 기억도 대화에 쓰지 않아요. 저장된 기억은 직접 지울 때까지 남아 있어요. Memory를 꺼도 현재 대화의 최근 메시지는 대화를 이어가기 위해 쓰일 수 있어요."}
-            {" "}크리에이터 본인은 이 내용을 볼 수 없고, 각 크리에이터 AI는 자기와 나눈 기억만 써요.
+            {" "}각 크리에이터 AI는 자기와 나눈 기억만 써요. 크리에이터 본인은 이 내용을 볼 수 없고, 내가 직접 공유한 항목만 볼 수 있어요.
           </p>
 
           {actionError && (
@@ -122,6 +155,49 @@ export function FanMemoryView() {
                           <span className="inline-block rounded-full bg-brand-tint px-2 py-0.5 text-micro font-medium text-brand">{MEMORY_CATEGORY_LABEL[m.category] ?? "기타"}</span>
                           <p className="mt-1.5 text-body leading-relaxed">{m.content}</p>
                           <p className="mt-0.5 text-meta text-faint">{formatShortDate(m.createdAt)}</p>
+                          {isShared(m.id) ? (
+                            <p className="mt-1.5 flex items-center gap-2 text-meta">
+                              <span className="font-medium text-brand-deep">✓ {name} 본인에게 공유 중</span>
+                              <button type="button" onClick={() => unshare(m.id)} disabled={!!busy} className="text-muted hover:text-danger disabled:opacity-50">
+                                {busy === `share:${m.id}` ? "취소하는 중…" : "공유 취소"}
+                              </button>
+                            </p>
+                          ) : sharing === m.id ? (
+                            <div className="mt-2 rounded-tile bg-brand-tint p-2.5">
+                              <p className="break-keep text-meta leading-relaxed text-ink-2">
+                                공유하면 {name} 본인이 이 항목을 볼 수 있어요. 다른 기억은 공유되지 않고, 언제든 취소할 수 있어요.
+                              </p>
+                              <label className="mt-2 flex items-center gap-2 text-meta text-muted">
+                                날짜가 있는 일이면 (선택)
+                                <input
+                                  type="date"
+                                  value={shareDate}
+                                  onChange={(e) => setShareDate(e.target.value)}
+                                  aria-label="공유할 날짜"
+                                  className="rounded-md border border-line-strong bg-surface px-2 py-1 text-meta text-ink"
+                                />
+                              </label>
+                              <div className="mt-2 flex gap-3 text-meta">
+                                <button type="button" onClick={() => share(m.id)} disabled={!!busy} className="font-semibold text-brand disabled:opacity-50">
+                                  {busy === `share:${m.id}` ? "공유하는 중…" : "공유하기"}
+                                </button>
+                                <button type="button" onClick={() => setSharing(null)} className="text-muted">
+                                  취소
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSharing(m.id);
+                                setShareDate("");
+                              }}
+                              className="mt-1.5 text-meta text-muted hover:text-brand"
+                            >
+                              {name}에게 공유
+                            </button>
+                          )}
                         </div>
                         <button
                           type="button"

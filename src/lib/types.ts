@@ -135,28 +135,6 @@ export interface FanMemoryItem {
   createdAt: string;
 }
 
-/** 크리에이터 입장에서 본 팬 */
-export interface FanProfile {
-  id: string;
-  nickname: string;
-  avatarUrl: string;
-  tier: Tier;
-  since: string;
-  reactionCount: number;
-  chatCount: number;
-  lastActiveAt: string;
-  memorySummary: string;
-  status: "active" | "muted" | "restricted";
-  /** 크리에이터 본인의 직접 답장을 기다리는 메시지 */
-  pendingMessage?: string;
-  /**
-   * "직접 확인 추천" 이유 — 사실 기반(답장 대기, 기념일 등)만.
-   * 팬을 점수화하거나 취약성을 평가하지 않는다.
-   */
-  recommendReason?: string;
-  birthdayToday?: boolean;
-  subscribedToday?: boolean;
-}
 
 /** Studio 대시보드의 오늘 요약 */
 export interface StudioToday {
