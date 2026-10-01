@@ -317,12 +317,18 @@ console.log("\nE. 구독 환영 메시지");
   const w = (await as(U.fan5, `select message, tier from public.subscription_welcomes`)).rows;
   check("팬 본인은 자기 환영 메시지를 읽음 (설정 문구 그대로)", w.length === 1 && w[0].message === "안녕! 구독해 줘서 고마워 :)" && w[0].tier === "subscriber", w);
   check("다른 팬은 0행", (await as(U.fan1, `select 1 from public.subscription_welcomes where fan_id <> $1`, [U.fan1])).rows.length === 0);
-  check("크리에이터는 자기 채널 것만", (await as(U.creatorA, `select 1 from public.subscription_welcomes`)).rows.length === 2 && (await as(U.creatorB, `select 1 from public.subscription_welcomes`)).rows.length === 0);
+  // v0.8.5b: 문구가 없던 때 유료였던 행에도 기본 AI · MOMENTY 안내가 생기므로 "개수" 대신 "자기 채널 것만"을 본다
+  const rowsA = (await as(U.creatorA, `select creator_id from public.subscription_welcomes`)).rows;
+  const rowsB = (await as(U.creatorB, `select creator_id from public.subscription_welcomes`)).rows;
+  check("크리에이터는 자기 채널 것만", rowsA.length >= 2 && rowsA.every((r) => r.creator_id === "c1") && rowsB.every((r) => r.creator_id === "c2"), { a: rowsA.length, b: rowsB.length });
   check("팬이 환영 메시지 위조 insert → permission denied",
     await failsWith(U.fan1, `insert into public.subscription_welcomes (fan_id, creator_id, tier, message) values ($1, 'c1', 'premium', '크리에이터 본인이 보냄')`, [U.fan1], /permission denied/));
   // 메시지를 설정하지 않은 채널
   await db.query(`insert into public.subscriptions (fan_id, creator_id, tier) values ($1, 'c2', 'premium')`, [U.fan2]);
-  check("환영 메시지를 설정하지 않은 채널 → 없음", (await n(`select count(*)::int as n from public.subscription_welcomes where creator_id = 'c2'`)) === 0);
+  // v0.8.5b 정책: 문구가 없으면 크리에이터 문구 대신 기본 AI(AI ON) 또는 MOMENTY 안내(AI OFF) — 크리에이터가 쓴 것처럼 보이는 행은 없다
+  check("환영 메시지를 설정하지 않은 채널 → 크리에이터 문구 없음 (v0.8.5b: 기본 AI · MOMENTY 안내)",
+    (await n(`select count(*)::int as n from public.subscription_welcomes where creator_id = 'c2' and source = 'creator'`)) === 0 &&
+      (await n(`select count(*)::int as n from public.subscription_welcomes where creator_id = 'c2' and fan_id = $1`, [U.fan2])) === 1);
   // 차단 관계면 보내지 않는다
   await as(U.creatorA, `insert into public.user_blocks (blocker_id, blocked_id) values ($1, $2)`, [U.creatorA, U.newbie]);
   await db.query(`insert into public.subscriptions (fan_id, creator_id, tier) values ($1, 'c1', 'subscriber')`, [U.newbie]);

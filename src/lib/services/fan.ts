@@ -145,3 +145,22 @@ export async function toggleSaved(momentId: string, saved: boolean): Promise<boo
     throw toServiceError(e, "보관하지 못했어요.");
   }
 }
+
+/* ---------- QA 전용 임시 구독 (개발 · QA 환경만, v0.9 결제 전까지) ---------- */
+
+/**
+ * 서버(/api/qa/subscription)가 QA 모드 · 로그인 · 크리에이터 · 차단을 확인하고 내 구독 등급만 바꾼다.
+ * 실제 결제는 일어나지 않는다. QA 모드가 아니면 서버가 404 → 오류.
+ */
+export async function qaSetSubscription(creatorId: string, targetPlan: Tier): Promise<Tier> {
+  const res = await fetch("/api/qa/subscription", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ creatorId, targetPlan }),
+  });
+  const body = (await res.json().catch(() => null)) as { ok?: boolean; subscription?: { tier: Tier }; error?: { message?: string } } | null;
+  if (!res.ok || !body?.ok) throw new ServiceError(body?.error?.message ?? "QA 구독을 바꾸지 못했어요.", res.status === 401 ? "auth" : "forbidden");
+  invalidateCreators();
+  notifyMomentsChanged();
+  return body.subscription!.tier;
+}

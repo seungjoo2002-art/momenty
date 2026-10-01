@@ -52,10 +52,13 @@ export default function ChatListPage() {
     else if (h.unread) byCreator.set(h.creatorId, { ...prev, unread: true });
   }
   // 구독 환영 메시지 (크리에이터가 설정한 자동 메시지) — 더 최근이면 미리보기로
+  // 출처대로: 크리에이터 문구 · 🤖 AI 자동 메시지 · MOMENTY 구독 안내
+  const welcomePreview = (w: (typeof data.welcomes)[number]) =>
+    w.source === "system" ? `MOMENTY · ${w.message}` : w.source === "default_ai" ? `🤖 AI · ${w.message}` : `자동 환영 메시지 · ${w.message}`;
   for (const w of data.welcomes) {
     const prev = byCreator.get(w.creatorId);
-    if (!prev) byCreator.set(w.creatorId, { creatorId: w.creatorId, at: w.createdAt, preview: `자동 환영 메시지 · ${w.message}`, human: false, unread: false });
-    else if (w.createdAt > prev.at) byCreator.set(w.creatorId, { ...prev, at: w.createdAt, preview: `자동 환영 메시지 · ${w.message}` });
+    if (!prev) byCreator.set(w.creatorId, { creatorId: w.creatorId, at: w.createdAt, preview: welcomePreview(w), human: false, unread: false });
+    else if (w.createdAt > prev.at) byCreator.set(w.creatorId, { ...prev, at: w.createdAt, preview: welcomePreview(w) });
   }
   // 팔로우 · 구독 중이고 AI Avatar가 켜진 크리에이터 — 아직 메시지가 없어도 목록에 (차단한 크리에이터는 새로 보이지 않는다)
   // 미리보기: 안내를 확인했으면 AI Avatar 첫 자동 메시지(확인 시각), 아니면 시작 안내

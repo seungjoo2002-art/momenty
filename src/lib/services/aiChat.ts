@@ -217,25 +217,45 @@ export function aiStarterText(creatorName: string): string {
 
 /* ---------- 구독 환영 메시지 (크리에이터가 미리 설정한 자동 메시지) ---------- */
 
+/**
+ * 출처 (v0.8.5b) — 화면 라벨이 여기서 정해진다
+ *   creator    크리에이터가 설정한 자동 환영 메시지
+ *   default_ai 크리에이터가 문구를 쓰지 않았고 AI Avatar가 켜져 있을 때 — "{이름}의 AI Avatar · 자동 메시지"
+ *   system     문구 없음 + AI OFF (또는 환영 메시지 끔) — "MOMENTY · 구독 안내" (크리에이터 · AI가 보낸 것이 아니다)
+ * migration 적용 전 DB의 행은 모두 크리에이터 문구였으므로 'creator'로 읽는다.
+ */
+export type WelcomeSource = "creator" | "default_ai" | "system";
+
 export interface SubscriptionWelcome {
   id: string;
   message: string;
   createdAt: string;
+  source: WelcomeSource;
+}
+
+function welcomeSource(v: unknown): WelcomeSource {
+  return v === "default_ai" || v === "system" ? v : "creator";
 }
 
 /** 내가 받은 구독 환영 메시지 전부 (Chat 목록 — 환영 메시지만 있는 크리에이터도 목록에 보이게) */
 export async function getMySubscriptionWelcomes(): Promise<(SubscriptionWelcome & { creatorId: string })[]> {
   const uid = await currentUserId();
   if (!uid) return [];
-  const { data, error } = await supabase().from("subscription_welcomes").select("id, creator_id, message, created_at").eq("fan_id", uid);
+  const { data, error } = await supabase().from("subscription_welcomes").select("*").eq("fan_id", uid);
   if (error) throw toServiceError(error, "환영 메시지를 불러오지 못했어요.");
-  return ((data ?? []) as { id: string; creator_id: string; message: string; created_at: string }[]).map((r) => ({ id: r.id, creatorId: r.creator_id, message: r.message, createdAt: r.created_at }));
+  return ((data ?? []) as { id: string; creator_id: string; message: string; created_at: string; source?: string }[]).map((r) => ({
+    id: r.id,
+    creatorId: r.creator_id,
+    message: r.message,
+    createdAt: r.created_at,
+    source: welcomeSource(r.source),
+  }));
 }
 
 export async function getSubscriptionWelcome(creatorId: string): Promise<SubscriptionWelcome | null> {
   const uid = await currentUserId();
   if (!uid) return null;
-  const { data, error } = await supabase().from("subscription_welcomes").select("id, message, created_at").eq("fan_id", uid).eq("creator_id", creatorId).maybeSingle();
+  const { data, error } = await supabase().from("subscription_welcomes").select("*").eq("fan_id", uid).eq("creator_id", creatorId).maybeSingle();
   if (error) throw toServiceError(error, "환영 메시지를 불러오지 못했어요.");
-  return data ? { id: data.id as string, message: data.message as string, createdAt: data.created_at as string } : null;
+  return data ? { id: data.id as string, message: data.message as string, createdAt: data.created_at as string, source: welcomeSource(data.source) } : null;
 }

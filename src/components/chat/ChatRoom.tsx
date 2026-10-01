@@ -117,7 +117,7 @@ export function ChatRoom({ creator, focusMomentId, initialMode = "ai" }: { creat
     // AI Avatar 첫 자동 메시지 — 확인 시각에 하나 (저장하지 않는 정해진 문장 → 몇 번을 들어와도 하나)
     ...(aiOn && consentAt ? [{ key: "ai-starter", at: consentAt, node: <AIStarterMessage creator={creator} text={aiStarterText(creator.name)} createdAt={consentAt} /> }] : []),
     ...(data?.welcome
-      ? [{ key: `w-${data.welcome.id}`, at: data.welcome.createdAt, node: <WelcomeMessage creator={creator} text={data.welcome.message} createdAt={data.welcome.createdAt} aiAvailable={creator.personaEnabled} /> }]
+      ? [{ key: `w-${data.welcome.id}`, at: data.welcome.createdAt, node: <WelcomeMessage creator={creator} text={data.welcome.message} createdAt={data.welcome.createdAt} source={data.welcome.source} aiAvailable={creator.personaEnabled && data.humanAllowed} /> }]
       : []),
     ...humanMessages.map((m) => ({
       key: `h-${m.id}`,

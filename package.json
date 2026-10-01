@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test:db": "tsx supabase/tests/rls.test.mjs && tsx supabase/tests/rls.v07.test.mjs && tsx supabase/tests/rls.v08.test.mjs && tsx supabase/tests/rls.v085.test.mjs",
+    "test:db": "tsx supabase/tests/rls.test.mjs && tsx supabase/tests/rls.v07.test.mjs && tsx supabase/tests/rls.v08.test.mjs && tsx supabase/tests/rls.v085.test.mjs && tsx supabase/tests/rls.v085b.test.mjs",
     "test:backend": "tsx supabase/tests/backend.test.mts",
     "db:seed": "tsx supabase/seed/seed.ts",
     "test:live": "tsx supabase/tests/live.test.mts",

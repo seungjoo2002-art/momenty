@@ -125,29 +125,59 @@ export function CreatorMessage({
 }
 
 /**
- * 구독 환영 메시지 — 크리에이터가 미리 설정해 둔 자동 메시지. 본인이 실시간으로 보낸 것처럼 보이지 않게
- * "본인" 라벨 · ✓ 표시 없이, "Creator가 설정한 자동 환영 메시지"를 항상 붙인다.
+ * 구독 환영 메시지 — 유료 구독이 처음 시작될 때 한 번. 누가 보낸 것인지 출처(source)대로만 보인다.
+ *  - creator    크리에이터가 미리 설정해 둔 문구: "본인" 라벨 · ✓ 없이 "Creator가 설정한 자동 환영 메시지"
+ *  - default_ai 크리에이터 문구가 없고 AI Avatar가 켜져 있을 때: AI 말풍선 + "{이름}의 AI Avatar · 자동 메시지"
+ *  - system     문구 없음 + AI OFF: 가운데 안내 + "MOMENTY · 구독 안내" (크리에이터 · AI가 보낸 것처럼 보이지 않게)
  */
 export function WelcomeMessage({
   creator,
   text,
   createdAt,
+  source = "creator",
   aiAvailable = false,
 }: {
   creator: Pick<Creator, "name" | "avatarUrl">;
   text: string;
   createdAt: string;
+  source?: "creator" | "default_ai" | "system";
   aiAvailable?: boolean;
 }) {
+  if (source === "system") {
+    return (
+      <div className="flex justify-center px-6">
+        <div className="max-w-[300px] rounded-tile bg-surface px-4 py-2.5 text-center ring-1 ring-line ring-inset">
+          <p className="text-micro font-semibold tracking-wide text-muted">MOMENTY · 구독 안내</p>
+          <p className="mt-0.5 text-caption whitespace-pre-line text-ink-2">{text}</p>
+          <time className="mt-0.5 block text-micro text-faint">{formatClock(createdAt)}</time>
+        </div>
+      </div>
+    );
+  }
+  const ai = source === "default_ai";
   return (
     <div className="flex gap-2 pr-12">
-      <Avatar src={creator.avatarUrl} name={creator.name} size="sm" />
+      <Avatar src={creator.avatarUrl} name={creator.name} size="sm" ring={ai ? "ai" : undefined} />
       <div className="min-w-0">
-        <p className="mb-1 text-meta text-ink-2">{creator.name}</p>
-        <div className="rounded-[18px] rounded-tl-[6px] border border-dashed border-line-strong bg-surface px-3.5 py-2.5 text-sub whitespace-pre-line text-ink">{text}</div>
+        {ai ? (
+          <div className="mb-1 flex items-center gap-1">
+            <span className="text-meta text-ink-2">🤖 {creator.name} AI</span>
+            <AIBadge />
+          </div>
+        ) : (
+          <p className="mb-1 text-meta text-ink-2">{creator.name}</p>
+        )}
+        <div
+          className={cn(
+            "rounded-[18px] rounded-tl-[6px] bg-surface px-3.5 py-2.5 text-sub whitespace-pre-line text-ink",
+            ai ? "ring-1 ring-line ring-inset" : "border border-dashed border-line-strong",
+          )}
+        >
+          {text}
+        </div>
         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-micro text-faint">
           <time>{formatClock(createdAt)}</time>
-          <span>· Creator가 설정한 자동 환영 메시지</span>
+          <span>· {ai ? `${creator.name}의 AI Avatar · 자동 메시지` : "Creator가 설정한 자동 환영 메시지"}</span>
         </div>
         {aiAvailable && <p className="mt-1.5 text-meta text-ai">🤖 아래에서 {creator.name} 공식 AI Avatar와 이야기를 시작할 수 있어요.</p>}
       </div>

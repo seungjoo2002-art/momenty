@@ -45,8 +45,12 @@ export interface AvatarOverview {
   readiness: AvatarReadiness;
   traits: Trait[];
   welcomeMessage: string;
+  /** 'auto' = 직접 쓴 문구 → 없으면 AI ON이면 기본 AI 환영 · 'off' = MOMENTY 구독 안내만 (v0.8.5b 전 DB면 'auto') */
+  welcomeMode: WelcomeMode;
   boundariesConfirmedAt: string | null;
 }
+
+export type WelcomeMode = "auto" | "off";
 
 export async function getAvatarOverview(creatorId: string): Promise<AvatarOverview> {
   const sb = supabase();
@@ -54,7 +58,8 @@ export async function getAvatarOverview(creatorId: string): Promise<AvatarOvervi
     sb.from("creators").select("persona_enabled").eq("id", creatorId).single(),
     getAvatarReadiness(),
     sb.from("creator_personas").select("traits").eq("creator_id", creatorId).maybeSingle(),
-    sb.from("creator_avatar_settings").select("welcome_message, boundaries_confirmed_at").eq("creator_id", creatorId).maybeSingle(),
+    // welcome_mode는 v0.8.5b migration 컬럼 — 적용 전 DB에서도 깨지지 않게 * 로 읽는다
+    sb.from("creator_avatar_settings").select("*").eq("creator_id", creatorId).maybeSingle(),
   ]);
   for (const r of [creator, persona, settings]) if (r.error) throw toServiceError(r.error, "AI Avatar 설정을 불러오지 못했어요.");
   return {
@@ -62,6 +67,7 @@ export async function getAvatarOverview(creatorId: string): Promise<AvatarOvervi
     readiness,
     traits: ((persona.data?.traits as Trait[] | undefined) ?? []),
     welcomeMessage: (settings.data?.welcome_message as string | undefined) ?? "",
+    welcomeMode: settings.data?.welcome_mode === "off" ? "off" : "auto",
     boundariesConfirmedAt: (settings.data?.boundaries_confirmed_at as string | undefined) ?? null,
   };
 }
@@ -192,6 +198,13 @@ export async function confirmAvatarBoundaries(): Promise<void> {
 /* ---------- 구독 환영 메시지 ---------- */
 
 export const WELCOME_MAX = 500;
+
+/** 환영 메시지 켜기/끄기 — 끄면 크리에이터 문구 · 기본 AI 환영 대신 MOMENTY 구독 안내만 */
+export async function setWelcomeMode(mode: WelcomeMode): Promise<WelcomeMode> {
+  const { data, error } = await supabase().rpc("set_welcome_mode", { p_mode: mode });
+  if (error) throw rpcError(error, "저장하지 못했어요.");
+  return data as WelcomeMode;
+}
 
 export async function saveWelcomeMessage(message: string): Promise<string> {
   const { data, error } = await supabase().rpc("save_welcome_message", { p_message: message });

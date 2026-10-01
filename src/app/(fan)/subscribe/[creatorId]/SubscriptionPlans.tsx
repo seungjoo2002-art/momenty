@@ -1,6 +1,7 @@
 "use client";
 
 import { Check, Crown, Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useAccount } from "@/components/auth/AuthProvider";
 import { SubscriptionBadge, VerifiedMark } from "@/components/badges";
@@ -10,7 +11,7 @@ import { Photo } from "@/components/ui/Photo";
 import { TopBar } from "@/components/ui/TopBar";
 import { FEATURES } from "@/lib/constants";
 import { useMomentData } from "@/lib/hooks/useMomentData";
-import { follow, getTier } from "@/lib/services/fan";
+import { follow, getTier, qaSetSubscription } from "@/lib/services/fan";
 import type { Creator, Tier } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
 import { formatPrice, shortName } from "@/lib/utils/format";
@@ -25,8 +26,11 @@ interface Plan {
 /**
  * 플랜 안내. 무료 팔로우는 실제로 저장된다.
  * 유료 구독(구독 · Premium)은 결제 연동 전이라 시작할 수 없다 — 결제 없이 등급을 올리는 경로는 없다 (DB도 거부).
+ * 예외: QA 모드(서버 설정 · qaEnabled)에서만 "QA 구독" 버튼 — 서버 API가 실제 subscriptions 행을 바꾼다 (실제 결제 없음).
  */
-export function SubscriptionPlans({ creator }: { creator: Creator }) {
+export function SubscriptionPlans({ creator, qaEnabled = false }: { creator: Creator; qaEnabled?: boolean }) {
+  const router = useRouter();
+  const [qaBusy, setQaBusy] = useState(false);
   const account = useAccount();
   const { data } = useMomentData(`tier:${creator.id}:${account?.userId ?? ""}`, async () => ({ tier: await getTier(creator.id) }));
   const currentTier = data?.tier;
@@ -61,6 +65,21 @@ export function SubscriptionPlans({ creator }: { creator: Creator }) {
   const plan = plans.find((p) => p.tier === selected)!;
   const paid = selected !== "follow";
   const alreadyIn = !!currentTier && (currentTier === selected || (selected === "follow" && currentTier !== "follow"));
+
+  // QA 전용: 서버가 내 구독 등급만 바꾼다 (해제는 follow로 — 대화 · 환영 메시지는 그대로)
+  async function runQa(target: Tier) {
+    setQaBusy(true);
+    setError(null);
+    try {
+      await qaSetSubscription(creator.id, target);
+      if (target === "follow") setSelected("follow");
+      else router.push(`/chat/${creator.id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "QA 구독을 바꾸지 못했어요.");
+    } finally {
+      setQaBusy(false);
+    }
+  }
 
   async function start() {
     if (paid) return; // 결제 연동 전
@@ -157,7 +176,7 @@ export function SubscriptionPlans({ creator }: { creator: Creator }) {
 
       <div className="sticky bottom-0 mt-6 border-t border-line bg-canvas/90 px-4 pt-3 pb-[max(env(safe-area-inset-bottom),16px)] backdrop-blur-md">
         {error && <p role="alert" className="mb-2 text-center text-caption text-danger">{error}</p>}
-        {paid && !FEATURES.payments && !alreadyIn && (
+        {paid && !FEATURES.payments && !alreadyIn && !qaEnabled && (
           <p className="mb-2 text-center text-meta text-muted">유료 구독은 결제 연동 후 열려요. 지금은 무료 팔로우로 함께할 수 있어요.</p>
         )}
         <Button size="lg" block disabled={!data || isOwner || status === "loading" || alreadyIn || paid} onClick={start}>
@@ -170,6 +189,24 @@ export function SubscriptionPlans({ creator }: { creator: Creator }) {
                 ? `${formatPrice(plan.price)} / 월 · 결제 준비 중`
                 : "무료로 팔로우하기"}
         </Button>
+        {qaEnabled && !isOwner && data && (
+          <div className="mt-2 rounded-tile border border-dashed border-line-strong px-3 py-2.5">
+            <div className="flex gap-2">
+              {paid && !alreadyIn && (
+                <Button size="sm" variant="secondary" className="flex-1" disabled={qaBusy} onClick={() => runQa(selected)}>
+                  {qaBusy && <Loader2 className="size-4 animate-spin" />}
+                  {selected === "premium" ? "QA Premium 시작" : "QA 구독 시작"}
+                </Button>
+              )}
+              {(currentTier === "subscriber" || currentTier === "premium") && (
+                <Button size="sm" variant="ghost" className="flex-1" disabled={qaBusy} onClick={() => runQa("follow")}>
+                  QA 구독 해제
+                </Button>
+              )}
+            </div>
+            <p className="mt-1.5 text-center text-micro text-faint">개발용 · 실제 결제가 발생하지 않습니다.</p>
+          </div>
+        )}
       </div>
     </main>
   );
