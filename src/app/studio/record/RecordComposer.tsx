@@ -198,7 +198,7 @@ export function RecordComposer({ initial }: { initial: MomentDraft }) {
       {visual && media && (
         <div className="absolute inset-0 animate-open">
           {type === "photo" ? (
-            <Photo src={media.previewUrl} alt="고른 사진" className="absolute inset-0 bg-black" />
+            <Photo src={media.previewUrl} alt="고른 사진" className="h-full w-full bg-black" />
           ) : (
             <video src={media.previewUrl} poster={media.posterUrl} autoPlay muted loop playsInline className="absolute inset-0 h-full w-full bg-black object-cover" />
           )}

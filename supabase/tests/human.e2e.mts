@@ -153,6 +153,8 @@ try {
     await cp.goto(`${BASE}/studio/fans`);
     await cp.getByText("오늘 확인할 팬").waitFor();
     await cp.getByText(FAN).first().waitFor();
+    // 팬 이름은 목록이 먼저 그려져도 보인다 — 검사할 사실 문장 자체가 그려질 때까지 기다린 뒤 읽는다
+    await cp.getByText(/최근 Moment 5개 중 4개에 반응했어요\.|구독한 지 0일|오늘 구독을 시작했어요\./).first().waitFor();
     const text = await cp.locator("main").innerText();
     return [text.includes("최근 Moment 5개 중 4개에 반응했어요.") || text.includes("구독한 지 0일") || text.includes("오늘 구독을 시작했어요."), text.slice(0, 400)];
   });
@@ -185,11 +187,14 @@ try {
     return [v === "지난 라이브에서 기타 이야기함" && (fanSees ?? []).length === 0, { v, fanSees: fanSees?.length }];
   });
 
-  console.log("\n[Human Chat · 실시간 · AI/Human 구분]");
-  await step("팬: 대화방을 직접 메시지 모드로 열어 둠 (✓ 배너)", async () => {
+  console.log("\n[한 대화방 · 실시간 · AI/Human 구분 (v0.8.5: 받는 쪽 선택 없음)]");
+  await step("팬: 대화방 — 받는 쪽 선택 버튼 없음 · AI 고지 배너 · 입력창 '이름에게 메시지'", async () => {
     lastPage = fp;
-    await fp.goto(`${BASE}/chat/${cid}?mode=human`);
-    await fp.getByText(`✓ ${NAME} 본인에게 직접 보내요 · AI가 답하지 않아요`).waitFor();
+    await fp.goto(`${BASE}/chat/${cid}`);
+    await fp.getByText(`AI가 생성한 답변입니다 · ${NAME} 본인이 아니에요`).waitFor();
+    const selectors = (await fp.getByRole("button", { name: `🤖 ${NAME} AI` }).count()) + (await fp.getByRole("button", { name: `✓ ${NAME}에게 직접` }).count()) + (await fp.getByRole("group", { name: "받는 사람" }).count());
+    const placeholder = await fp.getByLabel("메시지").getAttribute("placeholder");
+    return [selectors === 0 && placeholder === `${NAME}에게 메시지`, { selectors, placeholder }];
   });
   await step("크리에이터가 먼저 직접 메시지 (Studio 상세)", async () => {
     lastPage = cp;
@@ -199,36 +204,38 @@ try {
     await cp.getByText("안녕하세요, 직접 인사드려요!").waitFor();
     await cp.getByText(/✓ 직접 보냄/).first().waitFor();
   });
-  await step("팬 화면에 새로고침 없이 도착 (Realtime) · ✓ 이름 · '크리에이터가 직접 보낸 메시지' · 본인 라벨", async () => {
+  await step("팬 화면에 새로고침 없이 도착 (Realtime) · '이름 본인' · '크리에이터가 직접 보낸 메시지' · AI 배지 없음", async () => {
     lastPage = fp;
     await fp.getByText("안녕하세요, 직접 인사드려요!").waitFor({ timeout: 20_000 });
     await fp.getByText("· 크리에이터가 직접 보낸 메시지").waitFor();
-    const human = await fp.getByText(`✓ ${NAME}`, { exact: true }).count();
-    const badge = await fp.getByText("본인", { exact: true }).count();
-    return [human >= 1 && badge >= 1, { human, badge }];
+    const human = await fp.getByText(`${NAME} 본인`, { exact: true }).count();
+    const aiOnHuman = await fp.locator("text=안녕하세요, 직접 인사드려요!").locator("xpath=ancestor::div[contains(@class,'flex gap-2')][1]").getByText("AI", { exact: true }).count();
+    return [human >= 1 && aiOnHuman === 0, { human, aiOnHuman }];
   });
-  await step("팬 답장 (직접) → 내 말풍선에 '✓ 이름에게 직접'", async () => {
-    await fp.getByLabel("메시지").fill("저도 반가워요! 오늘 기록 잘 봤어요");
+  await step("팬이 보낸 메시지는 AI Avatar로 간다 (직접 메시지 행이 새로 생기지 않음 · 모델 호출 없음)", async () => {
+    const before = (await admin.from("human_messages").select("id", { count: "exact", head: true }).eq("sender_id", F.uid)).count ?? 0;
+    const req = fp.waitForRequest((r) => r.url().endsWith("/api/ai/chat") && r.method() === "POST");
+    await fp.getByLabel("메시지").fill("AI에게 가는 메시지");
     await fp.getByRole("button", { name: "보내기" }).click();
-    await fp.getByText("저도 반가워요! 오늘 기록 잘 봤어요").waitFor();
+    await req;
+    await fp.waitForTimeout(800);
+    const after = (await admin.from("human_messages").select("id", { count: "exact", head: true }).eq("sender_id", F.uid)).count ?? 0;
+    return [after === before, { before, after }];
+  });
+  await step("팬의 직접 메시지(기존 DB 경로 — 기능은 그대로) → Studio에 새로고침 없이 도착 · 팬 화면에는 '✓ 이름에게 직접'으로 출처 유지", async () => {
+    const { error } = await F.sb.rpc("send_message_to_creator", { p_creator_id: cid, p_content: "저도 반가워요! 오늘 기록 잘 봤어요" });
+    if (error) throw error;
+    lastPage = cp;
+    await cp.getByText("저도 반가워요! 오늘 기록 잘 봤어요").waitFor({ timeout: 20_000 });
+    lastPage = fp;
+    await fp.getByText("저도 반가워요! 오늘 기록 잘 봤어요").waitFor({ timeout: 20_000 });
     await fp.getByText(new RegExp(`✓ ${NAME}에게 직접 ·`)).first().waitFor();
   });
   await shot(fp, "fan-human");
-  await step("Studio 화면에 새로고침 없이 팬 답장 도착 (Realtime)", async () => {
-    lastPage = cp;
-    await cp.getByText("저도 반가워요! 오늘 기록 잘 봤어요").waitFor({ timeout: 20_000 });
-  });
   await shot(cp, "studio-detail");
-  await step("AI 모드로 바꾸면 'AI가 생성한 답변입니다 · 본인이 아니에요' 배너 · 크리에이터 메시지는 여전히 ✓ 본인 표시", async () => {
-    lastPage = fp;
-    await fp.getByRole("button", { name: `🤖 ${NAME} AI` }).click();
-    await fp.getByText(`AI가 생성한 답변입니다 · ${NAME} 본인이 아니에요`).waitFor();
-    const aiOnHuman = await fp.locator("text=안녕하세요, 직접 인사드려요!").locator("xpath=ancestor::div[contains(@class,'flex gap-2')][1]").getByText("AI", { exact: true }).count();
-    return [aiOnHuman === 0, { aiOnHuman }];
-  });
-  await step("대화 목록: '✓ 이름 · …' 미리보기 (직접 메시지로 구분)", async () => {
+  await step("대화 목록: '이름 본인 · …' 미리보기 (직접 메시지로 구분)", async () => {
     await fp.goto(`${BASE}/chat`);
-    await fp.getByText(new RegExp(`(✓ ${NAME}|나 → ✓ ${NAME}) · `)).first().waitFor();
+    await fp.getByText(new RegExp(`(${NAME} 본인|나 → ${NAME} 본인) · `)).first().waitFor();
   });
 
   console.log("\n[Fan Memory → 크리에이터에게 명시적 공유]");

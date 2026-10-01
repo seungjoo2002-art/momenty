@@ -10,8 +10,9 @@ import { formatClock, formatTime } from "@/lib/utils/format";
  * 세 종류의 말풍선은 절대 비슷해 보이지 않는다.
  *  - Creator AI : 흰 말풍선 + "🤖 {이름} AI" + "AI" 라벨 (크리에이터 본인의 말이 아니다)
  *  - 팬(나)     : 보라 말풍선, 흰 글자, 오른쪽
- *  - 실제 본인  : 라벤더 말풍선 + 보라 테두리 + "✓ {이름}" + "본인" 라벨, 아바타 보라 링 + "크리에이터가 직접 보낸 메시지"
- *  팬이 보낸 말풍선에는 누구에게 보냈는지(🤖 AI에게 / ✓ 이름에게 직접)를 작게 붙인다 — 한 방에 두 흐름이 섞여도 헷갈리지 않게.
+ *  - 실제 본인  : 라벤더 말풍선 + 보라 테두리 + "{이름} 본인" + 인증 표시(AI 라벨 없음), 아바타 보라 링 + "크리에이터가 직접 보낸 메시지"
+ *  한 대화방(v0.8.5): 팬은 받는 쪽을 고르지 않는다 — "누가 답했는지"만 위 표시로 구분한다.
+ *  예전에 팬이 크리에이터 본인에게 직접 보낸 메시지에는 받는 쪽(✓ 이름에게 직접)을 그대로 붙여 둔다.
  */
 
 export function AIMessage({
@@ -103,9 +104,8 @@ export function CreatorMessage({
       <Avatar src={creator.avatarUrl} name={creator.name} size="sm" ring="human" />
       <div className="min-w-0">
         <div className="mb-1 flex items-center gap-1">
-          <span className="text-meta font-semibold text-brand-deep">✓ {creator.name}</span>
+          <span className="text-meta font-semibold text-brand-deep">{creator.name} 본인</span>
           <VerifiedMark className="size-3.5" />
-          <span className="rounded-full bg-brand px-1.5 py-px text-micro font-semibold text-white">본인</span>
         </div>
         <div className="rounded-[18px] rounded-tl-[6px] bg-brand-soft px-3.5 py-2.5 text-sub text-ink ring-1 ring-brand/25 ring-inset">
           {text}

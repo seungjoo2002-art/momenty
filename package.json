@@ -19,6 +19,7 @@
     "test:persona-live": "tsx supabase/tests/persona.live.test.mts",
     "test:llm": "tsx supabase/tests/persona.llm.test.mts",
     "test:llm-hardening": "tsx supabase/tests/persona.hardening.llm.test.mts",
+    "test:llm-followup": "tsx supabase/tests/persona.followup.llm.test.mts",
     "test:unit": "tsx --conditions=react-server supabase/tests/guard.unit.test.mts && tsx --conditions=react-server supabase/tests/memory.unit.test.mts && tsx --conditions=react-server supabase/tests/fanManager.unit.test.mts && tsx --conditions=react-server supabase/tests/safeshare.unit.test.mts && tsx --conditions=react-server supabase/tests/avatar.unit.test.mts",
     "test:llm-memory": "tsx supabase/tests/memory.llm.test.mts",
     "test:core-loop": "tsx supabase/tests/core-loop.e2e.mts",

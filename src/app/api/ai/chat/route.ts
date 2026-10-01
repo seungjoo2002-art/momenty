@@ -11,7 +11,8 @@
  *   6. 경계(전)    팬 메시지 주제 검사 → 막힌 주제면 거절 모드 (Today · 사실 제외)
  *   7. Prompt      SYSTEM → STYLE → PERSONALITY → FACTS → BOUNDARIES → TODAY → FAN → CONVERSATION → USER
  *   8. Provider    (설정되어 있으면) LLM 호출
- *   9. 경계(후)    위치 · 만남 · 유출 · 사칭 검사 → 걸리면 고정 거절 문장
+ *   9. 경계(후)    위치 · 만남 · 유출 · 사칭 검사 → 위치 · 만남은 걸린 문장만 빼고 모델(Persona) 문장을 살린다.
+ *                  살릴 수 없거나 유출 · 사칭이면 말투(존댓말 · 웃음 · 이모지)만 맞춘 짧은 거절 (추가 모델 호출 없음)
  *  10. 저장        record_ai_exchange(서버 키, …) — 근거 Moment는 DB가 다시 검증
  *  11. Memory     (켜져 있으면) 팬이 자기에 대해 말한 것 → 서버 필터 → record_fan_memories (DB가 ON · 민감정보 재확인)
  *
@@ -24,7 +25,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { auditAi, type AiAuditEvent, type AiResponseMeta } from "@/lib/ai/audit";
 import { AiConfigError, getAiServerKey } from "@/lib/ai/config";
 import { contextTypesOf, createContextBuilder, loadPersona, loadRecentConversation, PersonaAccessError, type PersonaDenial } from "@/lib/ai/context";
-import { fallbackReply, postcheck, postFallbackReply, precheck, type GuardTopic } from "@/lib/ai/guard";
+import { fallbackReply, guardReply, precheck, type GuardTopic } from "@/lib/ai/guard";
 import { applyLearnedStyle, buildPersonaPrompt, CONVERSATION_WINDOW, parseModelOutput } from "@/lib/ai/prompt";
 import { filterMemoryCandidates, loadFanMemory, saveFanMemories, type FanMemoryContext } from "@/lib/ai/memory";
 import { getPersonaProvider, ProviderError } from "@/lib/ai/provider";
@@ -221,7 +222,7 @@ export async function POST(req: NextRequest) {
       throw e;
     }
 
-    // 9. 경계(후) — 걸리면 모델의 답은 버린다
+    // 9. 경계(후) — 걸린 문장은 버린다 (위치 · 만남은 문장 단위, 그 밖은 답 전체)
     // 모델이 본 근거 원문 — 여기 없는 장소 이름은 추측으로 본다
     const groundText = [
       ...(declineTopic ? [] : ctx.today.items.flatMap((m) => [m.content, m.location ?? ""])),
@@ -231,12 +232,22 @@ export async function POST(req: NextRequest) {
       ...memoryUsed.map((m) => m.content),
       input.message,
     ].join("\n");
-    const violation = postcheck({ reply: replyText, boundaries: persona.boundaries, creatorName: persona.creator.name, facts: persona.facts.map((f) => f.content), groundText, places: declineTopic ? [] : [...ctx.today.items, ...(ctx.focus ? [ctx.focus] : [])].flatMap((m) => (m.location ? [m.location] : [])), memories: memoryUsed.map((m) => m.content) });
-    if (violation || !replyText.trim()) {
-      const topic = violation ?? "leak";
-      replyText = postFallbackReply(topic, { message: input.message, formality: persona.style.formality, laughKk: persona.style.laughKk, creatorName: persona.creator.name });
+    const guarded = guardReply({
+      reply: replyText,
+      boundaries: persona.boundaries,
+      creatorName: persona.creator.name,
+      facts: persona.facts.map((f) => f.content),
+      groundText,
+      places: declineTopic ? [] : [...ctx.today.items, ...(ctx.focus ? [ctx.focus] : [])].flatMap((m) => (m.location ? [m.location] : [])),
+      memories: memoryUsed.map((m) => m.content),
+      style: { message: input.message, formality: persona.style.formality, laughKk: persona.style.laughKk, laughHh: persona.style.laughHh, emojiLevel: persona.style.emojiLevel, creatorName: persona.creator.name },
+    });
+    if (guarded.violation || !replyText.trim()) {
+      const topic = guarded.violation ?? "leak";
+      replyText = guarded.violation ? guarded.reply : fallbackReply("leak", persona.style.formality, persona.creator.name);
       meta.guard = { stage: "post", topic };
       memoryCandidates = [];
+      // 남긴 문장이 근거로 쓴 Moment는 알 수 없으므로 근거 표시는 하지 않는다 (DB가 다시 걸러도 보수적으로)
       groundedIds = [];
       boundary = topic === "leak" || topic === "impersonation" ? boundary : topic;
     }

@@ -47,7 +47,7 @@ export default function ChatListPage() {
     const name = creatorOf(h.creatorId)?.name ?? "";
     const at = h.lastMessageAt ?? "";
     const prev = byCreator.get(h.creatorId);
-    const humanRow: Row = { creatorId: h.creatorId, at, preview: m ? `${m.sender === "creator" ? `✓ ${name}` : `나 → ✓ ${name}`} · ${m.content}` : "", human: true, unread: h.unread };
+    const humanRow: Row = { creatorId: h.creatorId, at, preview: m ? `${m.sender === "creator" ? `${name} 본인` : `나 → ${name} 본인`} · ${m.content}` : "", human: true, unread: h.unread };
     if (!prev || at > prev.at) byCreator.set(h.creatorId, humanRow);
     else if (h.unread) byCreator.set(h.creatorId, { ...prev, unread: true });
   }
@@ -87,7 +87,7 @@ export default function ChatListPage() {
           if (!creator) return null;
           return (
             <li key={r.creatorId}>
-              <Link href={`/chat/${creator.id}${r.human ? "?mode=human" : ""}`} className="flex items-center gap-3 px-5 py-3 transition-colors active:bg-brand-tint">
+              <Link href={`/chat/${creator.id}`} className="flex items-center gap-3 px-5 py-3 transition-colors active:bg-brand-tint">
                 <Avatar src={creator.avatarUrl || undefined} name={creator.name} size="lg" ring={r.human ? "human" : "ai"} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">

@@ -68,7 +68,7 @@ export function buildFanSummary(input: SummaryInput): FanSummary {
   const ai = input.messages.filter((m) => m.source === "ai");
   const highlights: string[] = [];
   if (human.length) highlights.push(`직접 대화 ${human.length}개 · 마지막 ${day(human[human.length - 1].createdAt)}`);
-  if (ai.length) highlights.push(`AI Avatar 대화 ${ai.filter((m) => m.sender === "fan").length}개 메시지 (안내 확인 이후)`);
+  if (ai.length) highlights.push(`AI Avatar 대화 ${ai.filter((m) => m.sender === "fan").length}개 메시지 · 마지막 ${day(ai[ai.length - 1].createdAt)} (안내 확인 이후)`);
   else if (!input.aiConsented) highlights.push("AI Avatar 대화는 팬이 열람 안내를 확인하지 않아 보이지 않아요");
   highlights.push(input.reactions30d ? `최근 30일 Moment 반응 ${input.reactions30d}번${input.lastReactionAt ? ` · 마지막 ${day(input.lastReactionAt)}` : ""}` : "최근 30일 Moment 반응 없음");
 

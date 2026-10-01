@@ -81,7 +81,7 @@ export const PROMPT_CATEGORY_HINT: Partial<Record<PromptCategory, string>> = {
   romance: "사실을 밝힐 필요는 없어요. 이런 질문을 받으면 어떻게 답하는지만요.",
   sensitive: "건강 · 정치 같은 질문을 어떻게 피하는지 알려 주세요.",
   decline: "정중하게 거절하는 나만의 방식이면 돼요.",
-  unknown_fact: "기억나지 않거나 모르는 일에 어떻게 답하는지요.",
+  unknown_fact: "기억나지 않거나 모르는 일에 어떻게 답하는지요. 답의 내용이 사실로 학습되지는 않고, 말하는 방식만 배워요.",
   rude: "무례한 말에 어떻게 반응하는지요.",
 };
 

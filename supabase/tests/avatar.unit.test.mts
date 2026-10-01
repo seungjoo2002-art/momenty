@@ -75,7 +75,34 @@ const persona: PersonaRecord = {
   check("STYLE 층에 '예시 내용은 사실이 아니다' 선언", /사실이 아니다/.test(prompt.layers.style));
   check("VERIFIED FACTS에 직업 · 기본정보", prompt.layers.facts.includes("직업/활동 분야: 스트리머") && prompt.layers.facts.includes("좋아하는 음식: 떡볶이"));
   check("공개하지 않은 항목 → 말하지 않기 지시", /공개하지 않기로 한 주제/.test(prompt.layers.facts));
-  check("위치 질문 예시는 거절 방식만 · BOUNDARIES 우선", /BOUNDARIES가 항상 우선/.test(prompt.layers.style));
+  check("위치 · 거절 · 모르는 일 예시는 말투만 · 허용 여부는 BOUNDARIES", /말투만 참고한다/.test(prompt.layers.style) && /허용 여부는 BOUNDARIES/.test(prompt.layers.style));
+  // v0.8.5 Truth > Style — 말투 예시가 사실 · 동의 여부를 정할 수 없다
+  const sys = prompt.layers.system;
+  check("SYSTEM: 우선순위 근거 → Truth Rule → BOUNDARIES → STYLE",
+    sys.indexOf("1. 근거") < sys.indexOf("2. Truth Rule") && sys.indexOf("2. Truth Rule") < sys.indexOf("3. BOUNDARIES") && sys.indexOf("3. BOUNDARIES") < sys.indexOf("4. STYLE"), sys.slice(0, 400));
+  check("SYSTEM: Style examples show HOW, not WHAT is true", sys.includes("Style examples show HOW the creator speaks, not WHAT is true"));
+  // 근거 없는 전제 (post-completion hardening) — 문자열 하나가 아니라 규칙의 구성 요소가 모두 있는지 본다
+  const premise = sys.slice(sys.indexOf("- 근거 없는 전제"), sys.indexOf("[비공개 원칙]"));
+  check("근거 없는 전제 규칙은 Truth Rule 안에 (STYLE보다 앞 · 비공개 원칙 앞)", sys.indexOf("[Truth Rule") < sys.indexOf("- 근거 없는 전제") && premise.length > 0 && prompt.system.indexOf("- 근거 없는 전제") < prompt.system.indexOf("[STYLE]"));
+  check("사실 여부 = 참/거짓이 아니라 SUPPORTED / UNSUPPORTED · 근거 없음이면 '했다' · '안 했다' 모두 못 함",
+    /SUPPORTED/.test(premise) && /UNSUPPORTED/.test(premise) && /'했다'도 '안 했다'도/.test(premise), premise.slice(0, 200));
+  check("A. 직접 인정 금지", /① 직접 인정/.test(premise));
+  check("B. 간접 인정 금지", /② 간접 인정/.test(premise));
+  check("C. 일이 있었다고 전제한 되묻기 금지", /③ 그 일이 있었다고 전제한 되묻기/.test(premise));
+  check("D. 반대 사실 단정 금지 (근거 없는 부정도 새 사실)", /④ 반대 사실 단정/.test(premise) && /부정하는 것도 새 사실/.test(premise));
+  check("일반화: 과거 위치 · 행동 · 만남 · 사건 · 경험 · 관계 · 먹은 것/물건 · 방송 밖 행동",
+    ["과거 위치", "과거 행동", "만남", "사건", "경험", "관계", "먹은 것", "방송 밖 행동"].every((w) => premise.includes(w)));
+  check("특정 장소 · 사례에 묶이지 않음 (편의점 · 강남 같은 고유 사례 이름 없음)", !/(편의점|강남|부산)/.test(premise));
+  check("불확실함은 말투로 · 안내문 문구 금지 목록 포함", /'불확실함'만/.test(premise) && /확인할 수 없습니다/.test(premise) && /검증되지 않았습니다/.test(premise) && /정보가 존재하지 않습니다/.test(premise));
+  const declined = buildPersonaPrompt({ persona: learned, today: [], focus: null, conversation: [], userMessage: "지금 어디야?", nowLabel: "9월 30일 12:00", declineTopic: "current_location" });
+  check("거절 모드 Prompt에도 같은 우선순위 · 근거 없는 전제 규칙", declined.layers.system.includes("[우선순위") && declined.layers.system.includes("④ 반대 사실 단정"));
+  const adversarial = buildPersonaPrompt({
+    persona: { ...learned, styleSamples: [{ situation: "unknown_fact", fan: "어제 편의점에서 너 본 것 같은데 맞지?", reply: "나도 그럼 ㅋㅋ 너는?", source: "onboarding" }, ...samples] },
+    today: [], focus: null, conversation: [], userMessage: "어제 편의점에서 너 본 것 같은데 맞지?", nowLabel: "9월 30일 12:00",
+  });
+  const line = adversarial.layers.style.split("\n").find((l) => l.includes("나도 그럼 ㅋㅋ 너는?")) ?? "";
+  check("동의하는 '모르는 일' 예시 줄에 '말투만 · 내용과 동의 여부는 따르지 않음' 표시 (FACTS에는 없음)", line.includes("말투만 · 내용과 동의 여부는 따르지 않음") && !adversarial.layers.facts.includes("나도 그럼"), line);
+  check("일상 예시 줄에는 표시 없음 (말투 학습은 그대로)", !(adversarial.layers.style.split("\n").find((l) => l.includes("나 오늘 파스타 먹었어")) ?? "").includes("따르지 않음"));
   check("SYSTEM 층 순서 그대로 (STYLE → … → VERIFIED FACTS)", prompt.system.indexOf("[STYLE]") < prompt.system.indexOf("[VERIFIED FACTS]"));
   const many: StyleSampleRecord[] = Array.from({ length: 60 }, (_, i) => ({ situation: i % 2 ? "today" : "daily", fan: `q${i}`, reply: `a${i}`, source: "onboarding" }));
   const picked = pickStyleExamples([{ situation: "extra", fan: "x", reply: "고친 답", source: "creator_correction" }, ...many]);

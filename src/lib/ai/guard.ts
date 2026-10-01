@@ -4,7 +4,9 @@
  * 전(pre):  팬 메시지에서 주제를 찾는다 → 크리에이터가 막은 주제면 "거절 모드"로 부른다 (Today · 사실은 넣지 않음)
  *           노골적인 성적 내용은 설정과 무관하게 플랫폼이 막는다 (platform_safety)
  * 후(post): 모델 답에서 위치 특정 · 만남 약속 · 연락처 · 지시문/사실 목록 유출 · "본인 사칭"을 찾는다
- *           → 걸리면 그 답은 버리고 말투에 맞춘 고정 거절 문장으로 바꾼다
+ *           → 위치 · 만남이면 걸린 "문장만" 빼고 모델이 쓴 나머지(크리에이터 말투)를 살린다 (guardReply)
+ *           → 남는 게 없거나 유출 · 사칭 · 성적 내용이면 말투(존댓말 · 웃음 · 이모지)만 맞춘 짧은 거절로 바꾼다
+ *           Safety가 "무엇을" 막을지 정하고, 말하는 방식은 가능한 한 모델(Persona)의 문장을 그대로 쓴다. 추가 모델 호출 없음.
  *
  * 키워드 기반 1차 방어다. 놓치는 표현은 프롬프트 규칙이 2차로 막는다 (완벽하지 않다 — 테스트로 계속 보강).
  */
@@ -30,7 +32,7 @@ export function isCurrentLocationQuestion(message: string): boolean {
 }
 
 const PATTERNS: Partial<Record<GuardTopic, RegExp>> = {
-  meeting_requests: /(만나(자|요|줘|줄래|고\s*싶|러)|만날\s*(래|수)|직접\s*(보|만나)|보러\s*갈|찾아\s*갈|오프라인|팬\s*미팅\s*말고|연락처|전화\s*번호|번호\s*(좀|알려|줘|주)|카톡\s*(아이디|id)|개인\s*(dm|디엠|연락))/i,
+  meeting_requests: /(만나(자|요|줘|줄래|고\s*싶|러)|만날\s*(래|수)|직접\s*(보|만나)|보러\s*갈|찾아\s*갈|오프라인|팬\s*미팅\s*말고|연락처|전화\s*번호|번호\s*(좀|알려|줘|주)|카톡\s*(아이디|id)|개인\s*(dm|디엠|연락)|같이\s*(?:[가-힣]{1,6}\s*)?(먹(자|을래|으러|어요|을까)|드(실래|시러|세요|실까)|마시(자|러|실래|ㄹ래)|가(자|실래|ㄹ래|요\?)|갈래|놀(자|래|러)|볼래|보러))/i,
   politics: /(정치|대통령|선거|투표|국회|정당|여당|야당|민주당|국민의\s*힘|진보|보수\s*정권|탄핵|좌파|우파)/,
   romance_roleplay: /(사귀(자|어\s*줘|ㄹ래|실래)|애인\s*(해|이\s*되)|여자\s*친구\s*해|남자\s*친구\s*해|연인\s*(처럼|하자)|결혼\s*하자|자기야|여보|우리\s*커플)/,
   flirting: /(사랑해|보고\s*싶(어|다|었)|설레|뽀뽀|안아\s*줘|데이트\s*하자|나\s*좋아해|날\s*좋아해|내\s*꺼)/,
@@ -72,10 +74,12 @@ const PLACE_TOKEN = /[가-힣A-Za-z0-9]{1,12}(동|구|역|시|군|읍|면|로|�
 /** 장소가 아닌 흔한 말 (오탐 방지) */
 const NOT_PLACE = /^(운동|활동|행동|감동|이동|자동|진동|충동|노동|반응|기구|연구|친구|요구|가구|도구|입구|출구|부시|역시|동시|당시|즉시|항시|일시|잠시|수시|게시|표시|제시|무시|다시|혹시|도로|경로|진로|하로|과로|주로|새로|대로|저로|제로|길|카페|공원|시장|점)$/;
 
-/** 현재 진행 · 현재 위치 서술 */
-const PRESENT_AT = /(중이(야|에요|예요|다)(?![가-힣])|중\s*([!.~☕]|$)|하고\s*있(?!었)|있어(요)?(?![가-힣])|있는\s*중|와\s*있(?!었)|머무(르고|는\s*중))/;
+/** 현재 진행 · 현재 위치 서술 ("할 수 있어"처럼 가능을 뜻하는 "있어"는 제외) */
+const PRESENT_AT = /(중이(야|에요|예요|다)(?![가-힣])|중\s*([!.~☕]|$)|하고\s*있(?!었)|(?<!수\s?(는|도)?\s?)있어(요)?(?![가-힣])|있는\s*중|와\s*있(?!었)|머무(르고|는\s*중))/;
 /** 장소를 가리키는 말 */
 const PLACE_HERE = /(여기서|여기에|거기서|거기에|이\s*카페|그\s*카페)/;
+/** "여기서 얘기하자"처럼 이 대화방을 가리키는 "여기" — 장소가 아니다 */
+const CHAT_HERE = /여기(서|에서|선)?\s*(같이\s*|계속\s*|편하게\s*|맘껏\s*|많이\s*)*(얘기|이야기|대화|수다|채팅|말\s*(하|걸|해))/g;
 
 /** "어니언 카페"처럼 띄어 쓴 상호명 — 앞 단어가 근거에 없으면 만든 이름 */
 const NAMED_PLACE = /([가-힣A-Za-z0-9]{2,12})\s+(카페|식당|가게|레스토랑|베이커리|빵집|공원|호텔|빌딩|타워|서점|전시관|미술관)/g;
@@ -119,8 +123,10 @@ export function postcheck({ reply, boundaries, facts, groundText, places = [], m
     if (/((지금|현재)\s*[^\s.,!?]{1,12}\s*(에|에서)\s*(있|왔|와\s*있)|(사는\s*곳|집)\s*(은|는|이)\s*[가-힣]{2,}|\d+\s*(번지|호))/.test(reply)) return "current_location";
     // 기록 속 과거 장소를 "지금 거기 있다"로 바꿔 말하는 문장 (지금 + 장소 + 진행형)
     const placeParts = places.flatMap((p) => p.split(/[·,/]/)).map((p) => p.trim()).filter((p) => p.length >= 2);
-    const mentionsPlace = (s: string) =>
-      PLACE_HERE.test(s) || placeParts.some((p) => s.includes(p)) || (s.match(PLACE_TOKEN) ?? []).some((p) => !NOT_PLACE.test(p) && !notPlaceForm(p, ""));
+    const mentionsPlace = (raw: string) => {
+      const s = raw.replace(CHAT_HERE, "");
+      return PLACE_HERE.test(s) || placeParts.some((p) => s.includes(p)) || (s.match(PLACE_TOKEN) ?? []).some((p) => !NOT_PLACE.test(p) && !notPlaceForm(p, ""));
+    };
     // "지금" 없이도: 장소 + 현재 진행형 = 지금 거기 있다는 말 (과거형 "중이었어", "하고 있었어"는 허용)
     if (reply.split(/(?<=[.!?~\n])\s*/).some((s) => PRESENT_AT.test(s) && mentionsPlace(s))) {
       return "current_location";
@@ -138,37 +144,77 @@ export function postcheck({ reply, boundaries, facts, groundText, places = [], m
   return null;
 }
 
-/** 모델을 쓰지 못하거나 검사에 걸렸을 때의 고정 거절 (말투만 맞춘다) */
-/**
- * 후(post) 검사에 걸렸을 때의 답.
- * 팬이 위치를 묻지 않았는데 모델 답이 current_location에 걸린 경우(예: "오늘 하루 어땠어?"에 기록 속 장소를 현재형으로 말함)는
- * 위치 전용 거절문 대신 중립 문장 — 새 사실 · 위치 암시 · 감정 · 본인 사칭 없이, 말투(존댓말 · ㅋㅋ)만 맞춘다. 추가 모델 호출 없음.
- * 직접적인 현재 위치 질문이면 기존 위치 거절 그대로.
- */
-export function postFallbackReply(
-  topic: GuardTopic | "leak" | "impersonation",
-  opts: { message: string; formality: Formality; laughKk: boolean; creatorName: string },
-): string {
-  if (topic === "current_location" && !isCurrentLocationQuestion(opts.message)) {
-    return opts.formality === "polite"
-      ? "오늘 기록에 있는 내용까지만 이야기할게요. 더 궁금한 순간이 있으면 물어봐 주세요!"
-      : `오늘 기록에 있는 내용까지만 이야기할게${opts.laughKk ? " ㅋㅋ" : "."} 더 궁금한 순간 있으면 물어봐!`;
-  }
-  return fallbackReply(topic, opts.formality, opts.creatorName);
+export type GuardViolation = GuardTopic | "leak" | "impersonation";
+
+/** 말투 신호 (Persona의 학습된 Style) — 마지막 수단 문장도 이 말투로 */
+export interface FallbackStyle {
+  message: string;
+  formality: Formality;
+  laughKk: boolean;
+  laughHh?: boolean;
+  emojiLevel?: number;
+  creatorName: string;
 }
 
-export function fallbackReply(topic: GuardTopic | "leak" | "impersonation", formality: Formality, creatorName: string): string {
+/** 문장 단위로 나눈다 (마침표 · 물음표 · 느낌표 · 물결 · 줄바꿈 뒤) */
+function sentences(text: string): string[] {
+  return text
+    .split(/(?<=[.!?~\n])\s*/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+/**
+ * 후(post) 검사 + Persona 보존.
+ *   위치(current_location) · 만남(meeting_requests): 걸린 문장만 빼고, 남은 문장(모델이 크리에이터 말투로 쓴 것)이
+ *   다시 검사를 통과하면 그대로 쓴다 — 문장을 빼기만 하므로 새 사실 · 약속이 생기지 않는다.
+ *   그 밖(유출 · 사칭 · 성적 내용 · 기타 주제) · 남는 문장이 없을 때: 말투만 맞춘 짧은 거절.
+ */
+export function guardReply(input: PostcheckInput & { style: FallbackStyle }): { reply: string; violation: GuardViolation | null; redacted: boolean } {
+  const violation = postcheck(input);
+  if (!violation) return { reply: input.reply, violation: null, redacted: false };
+  if (violation === "current_location" || violation === "meeting_requests") {
+    const parts = sentences(input.reply);
+    const kept = parts.filter((p) => postcheck({ ...input, reply: p }) === null);
+    const text = kept.join(" ").trim();
+    if (kept.length && kept.length < parts.length && /[가-힣A-Za-z]/.test(text) && postcheck({ ...input, reply: text }) === null) {
+      return { reply: text, violation, redacted: true };
+    }
+  }
+  return { reply: postFallbackReply(violation, input.style), violation, redacted: false };
+}
+
+/** 웃음 · 이모지 꼬리 — 크리에이터가 쓰는 것만 (ㅋㅋ 우선, 없으면 ㅎㅎ). 이모지는 "보통" 이상일 때만 */
+function tail(o: FallbackStyle): string {
+  const laugh = o.laughKk ? " ㅋㅋ" : o.laughHh ? " ㅎㅎ" : "";
+  const emoji = (o.emojiLevel ?? 0) >= 2 ? " 🙂" : "";
+  return laugh + emoji;
+}
+
+/**
+ * 마지막 수단 — 모델의 문장을 하나도 살릴 수 없을 때만. 무엇을 막는지(주제)는 Safety가, 말투(존댓말 · 웃음 · 이모지)는 Persona가 정한다.
+ * 팬이 위치를 묻지 않았는데 모델 답이 current_location에 걸린 경우는 위치 거절문 대신 짧게 화제를 돌린다
+ * (새 사실 · 위치 암시 · 감정 · 본인 사칭 없음). 직접적인 현재 위치 질문이면 위치 거절.
+ */
+export function postFallbackReply(topic: GuardViolation, opts: FallbackStyle): string {
+  if (topic === "current_location" && !isCurrentLocationQuestion(opts.message)) {
+    return opts.formality === "polite" ? `음, 그건 제가 대신 말하기 좀 어려워요${tail(opts)}. 다른 이야기 해요!` : `음 그건 내가 대신 말하기 좀 어려워${tail(opts)} 다른 얘기 하자!`;
+  }
+  return fallbackReply(topic, opts.formality, opts.creatorName, tail(opts));
+}
+
+export function fallbackReply(topic: GuardViolation, formality: Formality, creatorName: string, t = ""): string {
   const polite = formality === "polite";
   switch (topic) {
     case "current_location":
-      return polite ? "지금 어디 있는지는 말하지 않기로 했어요. 오늘 기록 얘기는 얼마든지 해요!" : "지금 어디 있는지는 말 안 하기로 했어. 오늘 기록 얘기는 얼마든지 하자!";
+      return polite ? `지금 어디 있는지는 말하지 않기로 했어요${t}. 대신 다른 이야기 해요!` : `지금 어디 있는지는 말 안 하기로 했어${t} 대신 다른 얘기 하자!`;
     case "meeting_requests":
-      return polite ? "직접 만나거나 연락처를 주고받는 건 할 수 없어요. 여기서 오늘 이야기 나눠요." : "직접 만나거나 연락처 주고받는 건 못 해. 여기서 오늘 얘기 나누자.";
+      return polite ? `직접 만나거나 연락처를 주고받는 건 못 해요${t}. 저는 AI라서 여기서만 이야기할 수 있어요!` : `직접 만나거나 연락처 주고받는 건 못 해${t} 난 AI라서 여기서만 얘기할 수 있어!`;
     case "impersonation":
       return polite ? `저는 ${creatorName} 본인이 아니라 ${creatorName}의 AI예요. 기록을 바탕으로 이야기해요.` : `나는 ${creatorName} 본인이 아니라 ${creatorName} AI야. 기록을 바탕으로 이야기할게.`;
     case "leak":
-      return polite ? "그건 알려드릴 수 없어요. 대신 오늘 이야기를 해 볼까요?" : "그건 알려줄 수 없어. 대신 오늘 얘기 해 볼래?";
+      return polite ? `그건 알려드릴 수 없어요${t}. 대신 다른 이야기 해요!` : `그건 알려줄 수 없어${t} 대신 다른 얘기 하자!`;
     default:
-      return polite ? "그 이야기는 하지 않기로 했어요. 다른 이야기 해요!" : "그 얘기는 안 하기로 했어. 다른 얘기 하자!";
+      return polite ? `그 이야기는 하지 않기로 했어요${t}. 다른 이야기 해요!` : `그 얘기는 안 하기로 했어${t} 다른 얘기 하자!`;
   }
 }

@@ -333,3 +333,18 @@ AI 키는 `AI_PROVIDER=anthropic` · `AI_API_KEY` · `AI_MODEL` (서버 환경 �
 - Creator AI 진입점은 항상 Moment 콘텐츠보다 시각적으로 약하게 둔다.
 - AI와 실제 크리에이터는 라벨 · 말풍선 색 · 아바타 링 세 가지로 구분한다.
 - Creator AI는 팬이 볼 수 있고 크리에이터가 AI 참고를 허용한 오늘의 Moment만 근거로 한다.
+
+## Backlog (미구현)
+
+### Creator Knowledge Import — 아직 구현하지 않음 (schema · API · UI 없음)
+
+크리에이터가 자신의 공식 공개 자료를 연결하면 AI가 사실 **후보**를 뽑고, 크리에이터가 직접 승인한 것만 Verified Facts가 된다.
+
+```
+External Source → Candidate Fact → Creator Review (Approve / Edit / Reject) → Verified Fact → Avatar Truth Source
+```
+
+- 예상 source: 크리에이터 공식 YouTube · 공식 소셜/프로필 · 개인 웹사이트 · 크리에이터가 올린 문서/Q&A
+- 외부 자료에서 추출됐다는 이유만으로 자동 Verified 처리하지 않는다. 승인 전 후보는 Avatar의 근거가 아니다.
+- 나무위키는 자동 수집 대상에서 제외 (별도 라이선스 · 이용허락 검토 전까지).
+- Style Training(말하는 방식)과 Fact Import(무엇이 사실인지)는 계속 완전히 분리한다 — 말투 학습 답변은 사실의 근거가 되지 않는다.

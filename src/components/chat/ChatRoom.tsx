@@ -37,8 +37,11 @@ export type ChatMode = "ai" | "human";
  *   (팔로우는 확인이 아니다). 확인하면 그 시각에 AI Avatar 첫 자동 메시지(정해진 문장)가 한 번 보인다.
  * · AI Avatar 답장은 지금 정책 그대로 유료 구독자만 (DB가 다시 확인) — 팔로워에게는 입력창 대신 구독 안내를 보여준다.
  * · AI Avatar가 꺼진 크리에이터에게는 AI와 대화할 수 있다고 보이지 않는다 (구독자는 직접 메시지만).
+ * · v0.8.5 한 대화방: 팬은 "누구에게 보낼지" 고르지 않는다. AI Avatar가 켜져 있으면 팬 메시지는 AI Avatar가 답하고,
+ *   크리에이터 본인이 직접 보낸 메시지(Human Chat · 별도 테이블 그대로)는 같은 타임라인에 "{이름} 본인"으로 보인다 — 누가 답했는지만 구분.
+ *   AI Avatar가 꺼진 크리에이터의 유료 구독자는 (보낼 곳이 본인뿐이므로) 직접 메시지로 보낸다.
  */
-export function ChatRoom({ creator, focusMomentId, initialMode = "ai" }: { creator: Creator; focusMomentId?: string; initialMode?: ChatMode }) {
+export function ChatRoom({ creator, focusMomentId }: { creator: Creator; focusMomentId?: string }) {
   const { data, error, retry } = useMomentData(`chat:${creator.id}:${focusMomentId ?? ""}`, async () => {
     const [messages, focus, fan, humanConv, blocked, reported, consentAt, welcome] = await Promise.all([
       getAiConversation(creator.id),
@@ -63,7 +66,6 @@ export function ChatRoom({ creator, focusMomentId, initialMode = "ai" }: { creat
     return { messages, refs, focus: usableFocus, humanConv, human, humanAllowed: tier === "subscriber" || tier === "premium", blocked, reported, consentAt, welcome };
   });
 
-  const [mode, setMode] = useState<ChatMode>(initialMode);
   const [pending, setPending] = useState<string | null>(null);
   // 방금 보낸 (팬 · AI) 쌍 — 다시 읽은 대화에 그 AI 메시지가 들어올 때까지 화면에 남겨 둔다 (보낸 직후 사라지지 않게)
   const [sent, setSent] = useState<{ fan: AiChatMessage; ai: AiChatMessage }[]>([]);
@@ -88,8 +90,8 @@ export function ChatRoom({ creator, focusMomentId, initialMode = "ai" }: { creat
   const blocked = blockedOverride ?? data?.blocked ?? false;
   const humanAllowed = !!data?.humanAllowed;
   const aiOn = creator.personaEnabled;
-  // AI Avatar가 꺼져 있으면 구독자는 직접 메시지로만
-  const activeMode: ChatMode = humanAllowed ? (aiOn ? mode : "human") : "ai";
+  // 받는 쪽은 고르지 않는다: AI Avatar가 켜져 있으면 AI Avatar, 꺼져 있으면 (유료 구독자만) 크리에이터 본인
+  const activeMode: ChatMode = aiOn || !humanAllowed ? "ai" : "human";
   const convId = humanConvId ?? data?.humanConv ?? null;
   const reported = new Set([...(data?.reported ?? []), ...reportedNow]);
   // AI 대화 전 안내 확인 (AI Avatar가 켜져 있으면 팔로워 · 구독자 모두 — 확인 버튼을 눌러야만 기록된다)
@@ -109,7 +111,7 @@ export function ChatRoom({ creator, focusMomentId, initialMode = "ai" }: { creat
       at: m.createdAt,
       node:
         m.sender === "fan" ? (
-          <FanMessage key={m.id} text={m.content} createdAt={m.createdAt} to="🤖 AI에게" />
+          <FanMessage key={m.id} text={m.content} createdAt={m.createdAt} />
         ) : (
           <AIMessage key={m.id} creator={creator} text={m.content} createdAt={m.createdAt} refMoments={refOf(m.groundedMomentIds)} remembered={remembered.has(m.id)} />
         ),
@@ -136,8 +138,11 @@ export function ChatRoom({ creator, focusMomentId, initialMode = "ai" }: { creat
   }
 
   // 크리에이터 본인의 새 메시지 (Realtime · RLS — 이 대화 참여자에게만 온다)
+  // 구독은 대화(convId) · 크리에이터가 바뀔 때만 다시 만든다 — 화면 데이터를 다시 불러올 때마다 다시 구독하지 않는다
+  // (콜백은 data를 읽지 않는다: convId · creator · setState만)
+  const dataReady = !!data;
   useEffect(() => {
-    if (!data) return;
+    if (!dataReady) return;
     const add = (list: HumanMessage[]) => setLiveHuman((prev) => [...prev, ...list.filter((m) => !prev.some((x) => x.id === m.id))]);
     return subscribeHumanMessages(
       `fan-${creator.id}`,
@@ -157,7 +162,7 @@ export function ChatRoom({ creator, focusMomentId, initialMode = "ai" }: { creat
         add(list);
       },
     );
-  }, [data, convId, creator.id, creator.profileId]);
+  }, [dataReady, convId, creator.id, creator.profileId]);
 
   useEffect(() => {
     if (convId) void markHumanRead(convId);
@@ -250,11 +255,6 @@ export function ChatRoom({ creator, focusMomentId, initialMode = "ai" }: { creat
             <p className="mt-1 break-keep text-caption leading-relaxed text-muted">
               {josa(creator.name, "이", "가")} 설정한 말투와 확인한 사실, 오늘 남긴 기록을 바탕으로 이야기하는 AI예요. 기록에 없는 일은 지어내지 않아요.
             </p>
-            {humanAllowed && (
-              <p className="mt-3 break-keep text-caption leading-relaxed text-muted">
-                아래에서 <span className="font-semibold text-brand-deep">✓ {creator.name}에게 직접</span>을 고르면 크리에이터 본인에게 메시지를 보낼 수 있어요.
-              </p>
-            )}
           </div>
         )}
         {rows.map((r) => (
@@ -262,7 +262,7 @@ export function ChatRoom({ creator, focusMomentId, initialMode = "ai" }: { creat
         ))}
         {pending && (
           <>
-            <FanMessage text={pending} createdAt={new Date().toISOString()} to="🤖 AI에게" />
+            <FanMessage text={pending} createdAt={new Date().toISOString()} />
             <TypingIndicator label={`${creator.name} AI가 답하는 중`} />
           </>
         )}
@@ -282,12 +282,6 @@ export function ChatRoom({ creator, focusMomentId, initialMode = "ai" }: { creat
           </p>
         ) : (
           <>
-            {humanAllowed && aiOn && (
-              <div className="mb-2 flex gap-1.5" role="group" aria-label="받는 사람">
-                <ModeButton active={activeMode === "ai"} onClick={() => setMode("ai")} label={`🤖 ${creator.name} AI`} />
-                <ModeButton active={activeMode === "human"} onClick={() => setMode("human")} label={`✓ ${creator.name}에게 직접`} human />
-              </div>
-            )}
             {activeMode === "ai" && aiOn && !noticeNeeded && !aiReplyAllowed && (
               <div className="flex items-center gap-3 rounded-tile bg-canvas px-3.5 py-2.5">
                 <p className="min-w-0 flex-1 break-keep text-caption text-ink-2">AI Avatar와 이어서 대화하려면 구독이 필요해요.</p>
@@ -316,7 +310,7 @@ export function ChatRoom({ creator, focusMomentId, initialMode = "ai" }: { creat
                   }
                 }}
                 rows={1}
-                placeholder={activeMode === "human" ? `✓ ${creator.name}에게 직접 메시지` : `${creator.name} AI에게 메시지`}
+                placeholder={`${creator.name}에게 메시지`}
                 aria-label="메시지"
                 className={cn(
                   "max-h-32 min-h-11 flex-1 resize-none rounded-[22px] border bg-canvas px-4 py-2.5 text-sub outline-none",
@@ -380,22 +374,6 @@ function AiNoticeCard({ name, acking, onConfirm }: { name: string; acking: boole
         나중에
       </Link>
     </section>
-  );
-}
-
-function ModeButton({ active, onClick, label, human = false }: { active: boolean; onClick: () => void; label: string; human?: boolean }) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        "h-8 rounded-full px-3 text-meta font-medium transition-colors",
-        active ? (human ? "bg-brand-soft text-brand-deep ring-1 ring-brand/30" : "bg-ai-soft text-ai ring-1 ring-ai-line") : "text-muted hover:bg-canvas",
-      )}
-    >
-      {label}
-    </button>
   );
 }
 

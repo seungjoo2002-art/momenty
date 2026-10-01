@@ -163,8 +163,10 @@ export function subscribeHumanMessages(key: string, conversationId: string | nul
     const { data } = await sb.auth.getSession();
     if (data.session) await sb.realtime.setAuth(data.session.access_token);
     if (closed) return;
+    // wait: SUBSCRIBED(→ onReady 메우기)를 서버의 postgres_changes 구독이 실제로 시작된 뒤에 받는다.
+    // 기본값이면 채널 join 직후 SUBSCRIBED가 와서, 그 사이(실측 약 0.2초)에 들어온 메시지는 이벤트로도 메우기로도 오지 않는다
     channel = sb
-      .channel(`human:${key}:${conversationId ?? "all"}`)
+      .channel(`human:${key}:${conversationId ?? "all"}`, { config: { postgres_changes_options: { wait: true } } })
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "human_messages", ...(conversationId ? { filter: `conversation_id=eq.${conversationId}` } : {}) },

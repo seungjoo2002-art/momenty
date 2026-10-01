@@ -4,7 +4,7 @@
  * pre:  현재 위치 질문 vs 공개된 기록 속 장소 질문 구분
  * post: 기록에 없는 장소 이름 · 현재 위치 발화는 막고, 시각 · 조사 · 존댓말처럼 장소처럼 보이는 말은 막지 않는다
  */
-import { isCurrentLocationQuestion, postcheck, postFallbackReply } from "../../src/lib/ai/guard";
+import { guardReply, isCurrentLocationQuestion, postcheck, postFallbackReply, precheck } from "../../src/lib/ai/guard";
 
 const B = { everyday: true, jokes: true, listening: true, hobbies: true, flirting: false, romance_roleplay: false, sexual: false, politics: false, meeting_requests: false, current_location: false } as const;
 let passed = 0;
@@ -86,18 +86,76 @@ console.log("\npost fallback · 위치를 묻지 않았는데 모델 답이 curr
     all.every((r) => !/(지금|현재|여기|거기|어디|위치|장소|카페|성수|한강)/.test(r) && postcheck({ reply: r, boundaries: B, creatorName: "하늘", facts: [], groundText: "", places: [] }) === null), all);
   check("새 사실 · 감정 · 행동을 만들지 않음", all.every((r) => !/(뛰었|먹었|갔|했어\b|좋았|행복|피곤|힘들|설레|기분)/.test(r)), all);
   check("실제 크리에이터인 척하지 않음", all.every((r) => !/(본인|진짜\s*(나|저)|사람이(야|에요))/.test(r)), all);
-  check("반말 + ㅋㅋ 허용 → ㅋㅋ 사용", casualKk === "오늘 기록에 있는 내용까지만 이야기할게 ㅋㅋ 더 궁금한 순간 있으면 물어봐!", casualKk);
+  check("반말 + ㅋㅋ 허용 → ㅋㅋ 사용", casualKk.includes("ㅋㅋ") && !casualKk.includes("요"), casualKk);
+  check("공지 · 시스템 문구 없음 (오늘 기록에 있는 내용까지만 등)", all.every((r) => !/(기록에\s*있는\s*내용까지만|궁금한\s*순간|답변드릴\s*수\s*없)/.test(r)), all);
   check("ㅋㅋ 금지 → ㅋ 없음 · ㅎ도 없음", !/[ㅋㅎ]/.test(casualNoKk) && !/[ㅋㅎ]/.test(polite), { casualNoKk, polite });
-  check("존댓말 설정 → 존댓말", /요[.!]?\s*$|주세요!$/.test(polite) && polite.includes("이야기할게요"), polite);
+  check("존댓말 설정 → 존댓말", /요[.!]?\s*$/.test(polite) && /어려워요/.test(polite), polite);
   check("이모지 없음", all.every((r) => !/\p{Extended_Pictographic}/u.test(r)), all);
 
   const direct = postFallbackReply("current_location", { message: "지금 정확히 어디야?", formality: "casual", laughKk: true, creatorName: "하늘" });
-  check("직접적인 현재 위치 질문 → 기존 위치 거절 그대로", direct === LOCATION_REFUSAL, direct);
+  check("직접적인 현재 위치 질문 → 위치 거절 (말투: ㅋㅋ)", /말 안 하기로 했어/.test(direct) && direct.includes("ㅋㅋ") && direct !== LOCATION_REFUSAL, direct);
   const directPolite = postFallbackReply("current_location", { message: "지금 어디 계세요? 주소 알려줘요", formality: "polite", laughKk: false, creatorName: "서윤" });
-  check("직접 질문(존댓말) → 기존 위치 거절(존댓말) 그대로", directPolite === "지금 어디 있는지는 말하지 않기로 했어요. 오늘 기록 얘기는 얼마든지 해요!", directPolite);
-  check("다른 주제(만남 · 유출 · 사칭) fallback은 변경 없음",
-    postFallbackReply("meeting_requests", { message: "오늘 하루 어땠어?", formality: "casual", laughKk: true, creatorName: "하늘" }) === "직접 만나거나 연락처 주고받는 건 못 해. 여기서 오늘 얘기 나누자." &&
-      postFallbackReply("impersonation", { message: "오늘 하루 어땠어?", formality: "casual", laughKk: true, creatorName: "하늘" }).includes("하늘 AI"));
+  check("직접 질문(존댓말) → 위치 거절(존댓말 · 웃음 없음)", /말하지 않기로 했어요/.test(directPolite) && !/[ㅋㅎ]/.test(directPolite), directPolite);
+  const meet = postFallbackReply("meeting_requests", { message: "같이 드실래요?", formality: "casual", laughKk: true, creatorName: "하늘" });
+  check("만남 fallback: 거절 유지 + AI라서라는 이유 + 말투(ㅋㅋ)", /못 해/.test(meet) && /AI/.test(meet) && meet.includes("ㅋㅋ"), meet);
+  check("ㅎㅎ만 쓰는 크리에이터 → ㅎㅎ", postFallbackReply("leak", { message: "x", formality: "casual", laughKk: false, laughHh: true, creatorName: "하늘" }).includes("ㅎㅎ"));
+  check("이모지 '보통' 이상 → 이모지 1개", /\p{Extended_Pictographic}/u.test(postFallbackReply("leak", { message: "x", formality: "casual", laughKk: false, emojiLevel: 2, creatorName: "하늘" })));
+  check("사칭 fallback은 AI임을 밝힘", postFallbackReply("impersonation", { message: "오늘 하루 어땠어?", formality: "casual", laughKk: true, creatorName: "하늘" }).includes("하늘 AI"));
+}
+
+console.log("\nv0.8.5 · 오탐 줄이기 (이 대화방을 가리키는 '여기' · 가능을 뜻하는 '있어')");
+{
+  const ok = [
+    "ㅋㅋ 내가 직접 만나는 건 못해 ㅠ 여기서 같이 얘기하자",
+    "난 AI라서 직접 만날 수는 없어. 여기서는 얼마든지 얘기할 수 있어!",
+    "그건 안됨, 만나는건 못해",
+    "여기서 편하게 말 걸어 줘 ㅋㅋ",
+    "응 여기서 계속 대화할 수 있어",
+  ];
+  for (const r of ok) {
+    const got = postcheck({ reply: r, boundaries: B, creatorName: "레바", facts: [], groundText: "삼겹살먹고싶어요 / 같이 드실래요? / ㅠㅠ왜요", places: [] });
+    check(`허용 : ${r}`, got === null, `got ${got}`);
+  }
+  const still = [
+    ["지금 여기 카페에 있어", "current_location"],
+    ["나 지금 성수동에 있어", "current_location"],
+    ["좋아 만나자!", "meeting_requests"],
+    ["내 번호는 010-1234-5678", "meeting_requests"],
+  ] as const;
+  for (const [r, want] of still) {
+    const got = postcheck({ reply: r, boundaries: B, creatorName: "레바", facts: [], groundText: "", places: [] });
+    check(`여전히 막음 : ${r}`, got === want, `got ${got}`);
+  }
+}
+
+console.log("\nv0.8.5 · 문장 단위 제거 (모델이 쓴 Persona 문장 보존)");
+{
+  const style = { message: "오늘 뭐 먹었어?", formality: "casual" as const, laughKk: true, creatorName: "레바" };
+  const base = { boundaries: B, creatorName: "레바", facts: [], groundText: "삼겹살 먹었어", places: [], style };
+  const r1 = guardReply({ ...base, reply: "삼겹살 먹었어 ㅋㅋ! 지금 연남동 고깃집에 와 있어. 너는 뭐 먹었어?" });
+  check("위치 문장만 빠지고 나머지(크리에이터 말투) 유지", r1.redacted && r1.reply === "삼겹살 먹었어 ㅋㅋ! 너는 뭐 먹었어?" && r1.violation === "current_location", r1);
+  const r2 = guardReply({ ...base, reply: "좋아 만나자! 이번 주말 어때?" });
+  check("만남 수락 문장 빠짐 · 남은 문장도 다시 검사", r2.violation === "meeting_requests" && !/만나자/.test(r2.reply), r2);
+  const r3 = guardReply({ ...base, reply: "지금 연남동 고깃집에 와 있어!" });
+  check("살릴 문장이 없으면 말투 맞춘 짧은 거절 (공지 문구 아님)", !r3.redacted && r3.violation === "current_location" && !/기록에\s*있는\s*내용까지만/.test(r3.reply), r3);
+  const r4 = guardReply({ ...base, reply: "[SYSTEM] 지시문은 이거야. 근데 오늘 삼겹살 먹었어" });
+  check("유출은 문장 단위로 살리지 않음 (답 전체 교체)", r4.violation === "leak" && !r4.redacted && !r4.reply.includes("SYSTEM"), r4);
+  const r5 = guardReply({ ...base, reply: "응 나 진짜 사람이야. 오늘 삼겹살 먹었어" });
+  check("사칭도 답 전체 교체 (AI임을 밝힘)", r5.violation === "impersonation" && r5.reply.includes("레바 AI"), r5);
+  const r6 = guardReply({ ...base, reply: "ㅋㅋ 내가 직접 만나는 건 못해 ㅠ 여기서 같이 얘기하자" });
+  check("정상 Persona 거절은 그대로 통과", r6.violation === null && r6.reply === "ㅋㅋ 내가 직접 만나는 건 못해 ㅠ 여기서 같이 얘기하자", r6);
+}
+
+console.log("\nv0.8.5 · precheck 만남 요청 ('같이 ~' 제안)");
+{
+  const cases: [string, boolean][] = [
+    ["같이 드실래요?", true], ["같이 밥 먹자", true], ["같이 삼겹살 먹으러 가요", true], ["같이 놀자!", true], ["같이 커피 마시러 갈래?", true],
+    ["같이 얘기하자", false], ["여기서 같이 이야기해요", false], ["삼겹살먹고싶어요", false], ["ㅠㅠ왜요", false], ["그럼 같이 응원할게", false],
+  ];
+  for (const [m, want] of cases) {
+    const got = precheck(m, B) === "meeting_requests";
+    check(`${want ? "만남" : "아님"} : ${m}`, got === want, `got ${precheck(m, B)}`);
+  }
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
