@@ -226,10 +226,11 @@ try {
     await p2.context().close();
     return [!!alert?.includes("8자 이상"), alert];
   });
-  await step("프로필 사진 미리보기 · 사용자 이름 · 소개 · 카테고리 → Studio 시작하기 → /studio", async () => {
+  await step("프로필 사진 미리보기 · 아이디 · 직업 · 소개 · 카테고리 → Studio 시작하기 → /studio", async () => {
     await page.locator('input[type="file"]').setInputFiles({ name: "me.png", mimeType: "image/png", buffer: buf(media.png) });
     await page.getByRole("img", { name: A.name }).first().waitFor();
-    await page.getByLabel("사용자 이름").fill(A.handle);
+    await page.getByLabel("아이디").fill(A.handle);
+    await page.getByRole("button", { name: "작가", exact: true }).click();
     await page.getByLabel("소개").fill("UI 테스트로 만든 크리에이터예요.");
     await page.getByRole("button", { name: "아트" }).click();
     await shot(page, "01-creator-setup");
@@ -386,7 +387,7 @@ try {
   });
   await step("Discover에서 Creator A 발견 → 프로필", async () => {
     await fan.goto(`${BASE}/discover`);
-    await fan.getByPlaceholder("이름, 사용자 이름, 관심사로 찾기").fill(A.handle);
+    await fan.getByPlaceholder("이름, 아이디, 관심사로 찾기").fill(A.handle);
     await fan.getByRole("link", { name: new RegExp(A.name) }).first().click();
     await fan.waitForURL(new RegExp(`/creators/${creatorId}$`));
     return true;

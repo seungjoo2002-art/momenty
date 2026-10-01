@@ -49,7 +49,8 @@ export async function getPersonaSettings(creatorId: string): Promise<PersonaSett
     const [creator, persona, facts, boundaries] = await Promise.all([
       sb.from("creators").select("persona_enabled").eq("id", creatorId).single(),
       sb.from("creator_personas").select("formality, reply_length, laugh_kk, laugh_hh, emoji_level, phrases, mood, example_messages, traits").eq("creator_id", creatorId).maybeSingle(),
-      sb.from("creator_facts").select("id, category, content, active, last_verified_at").eq("creator_id", creatorId).order("created_at"),
+      // 기본정보(basic_key)는 AI Avatar › 기본정보에서 따로 관리한다
+      sb.from("creator_facts").select("id, category, content, active, last_verified_at").eq("creator_id", creatorId).is("basic_key", null).order("created_at"),
       sb.from("creator_boundaries").select("topic, allowed").eq("creator_id", creatorId),
     ]);
     for (const r of [creator, persona, facts, boundaries]) if (r.error) throw r.error;

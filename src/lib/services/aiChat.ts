@@ -94,6 +94,7 @@ export type AiChatErrorCode =
   | "unauthenticated"
   | "subscription_required"
   | "blocked"
+  | "ai_notice_required"
   | "persona_disabled"
   | "persona_not_configured"
   | "own_channel"
@@ -158,4 +159,65 @@ export async function sendAiMessage(input: { creatorId: string; message: string;
       boundary: body.message.boundary,
     },
   };
+}
+
+/* ---------- AI 대화 열람 안내 (v0.8.5) ----------
+ * AI Avatar와의 대화는 서비스 제공과 팬 관리를 위해 크리에이터가 확인할 수 있다.
+ * 팬이 크리에이터별로 안내를 확인해야 AI 대화를 시작할 수 있고(DB가 확인), 크리에이터는 확인한 "뒤"의 메시지만 본다.
+ * 확인을 취소하면(행 삭제) 크리에이터는 더 이상 볼 수 없고, AI 대화도 다시 확인해야 열린다. Fan Memory는 어느 경우에도 공개되지 않는다.
+ */
+
+export const AI_VIEW_NOTICE =
+  "AI Avatar와의 대화는 서비스 제공과 팬 관리를 위해 크리에이터가 확인할 수 있어요. 안내를 확인한 뒤의 대화만 보이고, 그 전 대화와 AI Memory는 공개되지 않아요.";
+
+export interface AiViewConsent {
+  creatorId: string;
+  agreedAt: string;
+}
+
+/** 이 크리에이터에 대해 안내를 확인했는지 (확인 시각 또는 null) */
+export async function getAiViewConsent(creatorId: string): Promise<string | null> {
+  const uid = await currentUserId();
+  if (!uid) return null;
+  const { data, error } = await supabase().from("ai_creator_view_consents").select("agreed_at").eq("fan_id", uid).eq("creator_id", creatorId).maybeSingle();
+  if (error) throw toServiceError(error, "안내 확인 여부를 불러오지 못했어요.");
+  return (data?.agreed_at as string | undefined) ?? null;
+}
+
+export async function getMyAiViewConsents(): Promise<AiViewConsent[]> {
+  const uid = await currentUserId();
+  if (!uid) return [];
+  const { data, error } = await supabase().from("ai_creator_view_consents").select("creator_id, agreed_at").eq("fan_id", uid).order("agreed_at", { ascending: false });
+  if (error) throw toServiceError(error, "목록을 불러오지 못했어요.");
+  return ((data ?? []) as { creator_id: string; agreed_at: string }[]).map((r) => ({ creatorId: r.creator_id, agreedAt: r.agreed_at }));
+}
+
+export async function acknowledgeAiNotice(creatorId: string): Promise<string> {
+  const { data, error } = await supabase().rpc("acknowledge_ai_notice", { p_creator_id: creatorId });
+  if (error) throw toServiceError(error, "확인하지 못했어요.");
+  return data as string;
+}
+
+/** 확인 취소 — 크리에이터 열람이 멈추고, AI 대화는 다시 확인해야 열린다 */
+export async function withdrawAiNotice(creatorId: string): Promise<void> {
+  const uid = await currentUserId();
+  if (!uid) throw new ServiceError("로그인이 필요해요.", "auth");
+  const { error } = await supabase().from("ai_creator_view_consents").delete().eq("fan_id", uid).eq("creator_id", creatorId);
+  if (error) throw toServiceError(error, "취소하지 못했어요.");
+}
+
+/* ---------- 구독 환영 메시지 (크리에이터가 미리 설정한 자동 메시지) ---------- */
+
+export interface SubscriptionWelcome {
+  id: string;
+  message: string;
+  createdAt: string;
+}
+
+export async function getSubscriptionWelcome(creatorId: string): Promise<SubscriptionWelcome | null> {
+  const uid = await currentUserId();
+  if (!uid) return null;
+  const { data, error } = await supabase().from("subscription_welcomes").select("id, message, created_at").eq("fan_id", uid).eq("creator_id", creatorId).maybeSingle();
+  if (error) throw toServiceError(error, "환영 메시지를 불러오지 못했어요.");
+  return data ? { id: data.id as string, message: data.message as string, createdAt: data.created_at as string } : null;
 }

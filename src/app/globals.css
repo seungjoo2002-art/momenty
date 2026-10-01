@@ -131,6 +131,8 @@
 
 html {
   -webkit-tap-highlight-color: transparent;
+  /* 고정 하단 탭(BottomNavigation)이 차지하는 높이 — 탭 아래 콘텐츠 여백 · 하단 CTA 위치가 같은 값을 쓴다 */
+  --bottom-nav-space: calc(76px + env(safe-area-inset-bottom));
 }
 
 body {

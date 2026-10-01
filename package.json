@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test:db": "tsx supabase/tests/rls.test.mjs && tsx supabase/tests/rls.v07.test.mjs && tsx supabase/tests/rls.v08.test.mjs",
+    "test:db": "tsx supabase/tests/rls.test.mjs && tsx supabase/tests/rls.v07.test.mjs && tsx supabase/tests/rls.v08.test.mjs && tsx supabase/tests/rls.v085.test.mjs",
     "test:backend": "tsx supabase/tests/backend.test.mts",
     "db:seed": "tsx supabase/seed/seed.ts",
     "test:live": "tsx supabase/tests/live.test.mts",
@@ -19,7 +19,7 @@
     "test:persona-live": "tsx supabase/tests/persona.live.test.mts",
     "test:llm": "tsx supabase/tests/persona.llm.test.mts",
     "test:llm-hardening": "tsx supabase/tests/persona.hardening.llm.test.mts",
-    "test:unit": "tsx --conditions=react-server supabase/tests/guard.unit.test.mts && tsx --conditions=react-server supabase/tests/memory.unit.test.mts && tsx --conditions=react-server supabase/tests/fanManager.unit.test.mts && tsx --conditions=react-server supabase/tests/safeshare.unit.test.mts",
+    "test:unit": "tsx --conditions=react-server supabase/tests/guard.unit.test.mts && tsx --conditions=react-server supabase/tests/memory.unit.test.mts && tsx --conditions=react-server supabase/tests/fanManager.unit.test.mts && tsx --conditions=react-server supabase/tests/safeshare.unit.test.mts && tsx --conditions=react-server supabase/tests/avatar.unit.test.mts",
     "test:llm-memory": "tsx supabase/tests/memory.llm.test.mts",
     "test:core-loop": "tsx supabase/tests/core-loop.e2e.mts",
     "test:human-live": "tsx supabase/tests/human.live.test.mts",
@@ -29,6 +29,8 @@
     "prebuild": "node scripts/copy-ocr-assets.mjs",
     "test:safety-e2e": "tsx supabase/tests/safety.e2e.mts",
     "test:discover-e2e": "tsx supabase/tests/discover.e2e.mts",
+    "test:avatar-e2e": "tsx supabase/tests/avatar.e2e.mts",
+    "test:avatar-live": "tsx supabase/tests/avatar.live.test.mts",
     "find:test-leftovers": "tsx scripts/find-test-leftovers.mts"
   },
   "dependencies": {

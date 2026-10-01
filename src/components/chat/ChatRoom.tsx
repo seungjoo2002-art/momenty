@@ -8,7 +8,7 @@ import { ButtonLink } from "@/components/ui/Button";
 import { LoadError } from "@/components/ui/LoadState";
 import { TopBar, TopBarIcon } from "@/components/ui/TopBar";
 import { useMomentData } from "@/lib/hooks/useMomentData";
-import { AiChatError, getAiConversation, sendAiMessage, type AiChatMessage } from "@/lib/services/aiChat";
+import { acknowledgeAiNotice, AI_VIEW_NOTICE, AiChatError, getAiConversation, getAiViewConsent, getSubscriptionWelcome, sendAiMessage, type AiChatMessage } from "@/lib/services/aiChat";
 import { getCurrentFan } from "@/lib/services/fan";
 import { getHumanConversationId, getHumanMessages, HumanChatError, markHumanRead, sendHumanToCreator, subscribeHumanMessages, type HumanMessage } from "@/lib/services/humanChat";
 import { getMoment, getMomentsByIds } from "@/lib/services/moments";
@@ -17,7 +17,7 @@ import type { Creator, Moment } from "@/lib/types";
 import { cn } from "@/lib/utils/cn";
 import { tierFor } from "@/lib/utils/access";
 import { josa } from "@/lib/utils/format";
-import { AIMessage, CreatorMessage, FanMessage, SystemNotice, TypingIndicator } from "./messages";
+import { AIMessage, CreatorMessage, FanMessage, SystemNotice, TypingIndicator, WelcomeMessage } from "./messages";
 import { BlockSheet, ReportSheet } from "./SafetySheets";
 
 const MESSAGE_MAX = 1000;
@@ -31,16 +31,20 @@ export type ChatMode = "ai" | "human";
  * · 내가 보낸 말풍선에는 받는 쪽(🤖 AI에게 / ✓ 이름에게 직접)을 붙인다. 아래 입력창도 지금 누구에게 보내는지 먼저 고른다.
  * · 직접 메시지는 subscriber · premium만 (DB가 다시 확인). 차단 관계면 직접 메시지 · Creator AI 모두 멈춘다.
  * · AI 경로는 creatorId · 메시지 · momentId만 보낸다 (Moment 본문 · 직접 대화 내용은 AI에게 가지 않는다).
+ * · AI Avatar 대화는 크리에이터가 확인할 수 있다 — 팬이 안내를 확인해야 AI 대화가 열린다 (DB도 확인). 확인 전 대화는 공개되지 않는다.
+ * · 구독 환영 메시지는 "크리에이터가 설정한 자동 환영 메시지"로 따로 보여준다 (본인이 실시간으로 보낸 메시지가 아니다).
  */
 export function ChatRoom({ creator, focusMomentId, initialMode = "ai" }: { creator: Creator; focusMomentId?: string; initialMode?: ChatMode }) {
   const { data, error, retry } = useMomentData(`chat:${creator.id}:${focusMomentId ?? ""}`, async () => {
-    const [messages, focus, fan, humanConv, blocked, reported] = await Promise.all([
+    const [messages, focus, fan, humanConv, blocked, reported, consentAt, welcome] = await Promise.all([
       getAiConversation(creator.id),
       focusMomentId ? getMoment(focusMomentId) : Promise.resolve(undefined),
       getCurrentFan(),
       getHumanConversationId(creator.id),
       isBlockedByMe(creator.profileId),
       getMyReportedMessageIds(),
+      getAiViewConsent(creator.id),
+      getSubscriptionWelcome(creator.id),
     ]);
     const [refs, human] = await Promise.all([
       (async () => {
@@ -52,7 +56,7 @@ export function ChatRoom({ creator, focusMomentId, initialMode = "ai" }: { creat
     // 볼 수 없거나 다른 크리에이터의 Moment는 focus로 보여주지 않는다 (서버도 Context에 넣지 않는다)
     const usableFocus = focus && !focus.locked && focus.creatorId === creator.id ? focus : undefined;
     const tier = tierFor(fan, creator.id);
-    return { messages, refs, focus: usableFocus, humanConv, human, humanAllowed: tier === "subscriber" || tier === "premium", blocked, reported };
+    return { messages, refs, focus: usableFocus, humanConv, human, humanAllowed: tier === "subscriber" || tier === "premium", blocked, reported, consentAt, welcome };
   });
 
   const [mode, setMode] = useState<ChatMode>(initialMode);
@@ -71,6 +75,10 @@ export function ChatRoom({ creator, focusMomentId, initialMode = "ai" }: { creat
   const [menuOpen, setMenuOpen] = useState(false);
   const [reportId, setReportId] = useState<string | null>(null);
   const [reportedNow, setReportedNow] = useState<Set<string>>(new Set());
+  const [ackAt, setAckAt] = useState<string | null>(null);
+  const [acking, setAcking] = useState(false);
+  // 다른 곳에서 확인을 취소한 경우 (서버가 ai_notice_required) — 다시 묻는다
+  const [noticeRevoked, setNoticeRevoked] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
 
   const blocked = blockedOverride ?? data?.blocked ?? false;
@@ -78,6 +86,8 @@ export function ChatRoom({ creator, focusMomentId, initialMode = "ai" }: { creat
   const activeMode: ChatMode = humanAllowed ? mode : "ai";
   const convId = humanConvId ?? data?.humanConv ?? null;
   const reported = new Set([...(data?.reported ?? []), ...reportedNow]);
+  // AI 대화 전 안내 확인 (구독자가 AI 모드일 때만 묻는다)
+  const noticeNeeded = !!data && creator.personaEnabled && humanAllowed && (noticeRevoked || !(ackAt ?? data.consentAt));
 
   const loaded = data?.messages ?? [];
   const aiMessages = [...loaded, ...sent.filter((p) => !loaded.some((x) => x.id === p.ai.id)).flatMap((p) => [p.fan, p.ai])];
@@ -95,6 +105,9 @@ export function ChatRoom({ creator, focusMomentId, initialMode = "ai" }: { creat
           <AIMessage key={m.id} creator={creator} text={m.content} createdAt={m.createdAt} refMoments={refOf(m.groundedMomentIds)} remembered={remembered.has(m.id)} />
         ),
     })),
+    ...(data?.welcome
+      ? [{ key: `w-${data.welcome.id}`, at: data.welcome.createdAt, node: <WelcomeMessage creator={creator} text={data.welcome.message} createdAt={data.welcome.createdAt} aiAvailable={creator.personaEnabled} /> }]
+      : []),
     ...humanMessages.map((m) => ({
       key: `h-${m.id}`,
       at: m.createdAt,
@@ -172,7 +185,8 @@ export function ChatRoom({ creator, focusMomentId, initialMode = "ai" }: { creat
       // 저장된 대화를 다시 읽는다 (서버가 저장한 그대로 — 시각 · 근거 Moment 포함). 들어오면 위의 쌍은 자동으로 빠진다
       retry();
     } catch (ex) {
-      setErr(ex instanceof AiChatError ? ex : new AiChatError("잠시 후 다시 시도해 주세요.", "error"));
+      if (ex instanceof AiChatError && ex.code === "ai_notice_required") setNoticeRevoked(true);
+      else setErr(ex instanceof AiChatError ? ex : new AiChatError("잠시 후 다시 시도해 주세요.", "error"));
       setInput(text); // 저장되지 않았으니 다시 보낼 수 있게
     } finally {
       setPending(null);
@@ -180,6 +194,19 @@ export function ChatRoom({ creator, focusMomentId, initialMode = "ai" }: { creat
   }
 
   const busy = !!pending || sendingHuman;
+
+  async function acknowledge() {
+    setAcking(true);
+    setErr(null);
+    try {
+      setAckAt(await acknowledgeAiNotice(creator.id));
+      setNoticeRevoked(false);
+    } catch (ex) {
+      setErr(new AiChatError(ex instanceof Error ? ex.message : "잠시 후 다시 시도해 주세요.", "error"));
+    } finally {
+      setAcking(false);
+    }
+  }
 
   return (
     <main className="flex h-dvh flex-col bg-canvas">
@@ -248,7 +275,26 @@ export function ChatRoom({ creator, focusMomentId, initialMode = "ai" }: { creat
                 <ModeButton active={activeMode === "human"} onClick={() => setMode("human")} label={`✓ ${creator.name}에게 직접`} human />
               </div>
             )}
-            {activeMode === "ai" && data?.focus && focusOn && (
+            {activeMode === "ai" && noticeNeeded ? (
+              <div role="note" className="mb-1 rounded-card border border-ai-line bg-ai-soft/60 p-3.5">
+                <p className="flex items-center gap-1.5 text-caption font-semibold text-ai">
+                  <Bot className="size-4" />
+                  {creator.name} 공식 AI Avatar와 대화하기 전에
+                </p>
+                <p className="mt-1.5 break-keep text-caption leading-relaxed text-ink-2">{AI_VIEW_NOTICE}</p>
+                <p className="mt-1 break-keep text-meta text-muted">My › 개인정보 및 안전에서 언제든 확인을 취소할 수 있어요.</p>
+                <button
+                  type="button"
+                  onClick={acknowledge}
+                  disabled={acking}
+                  className="mt-3 inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-tile bg-brand text-sub font-semibold text-white disabled:opacity-50"
+                >
+                  {acking && <Loader2 className="size-4 animate-spin" />}
+                  확인하고 AI Avatar와 대화하기
+                </button>
+              </div>
+            ) : null}
+            {activeMode === "ai" && data?.focus && focusOn && !noticeNeeded && (
               <div className="mb-2 flex items-center gap-2 rounded-tile bg-canvas p-2">
                 <MomentMedia moment={data.focus} variant="thumb" className="size-9 shrink-0" />
                 <p className="min-w-0 flex-1 truncate text-meta text-ink-2">이 순간에 대해 이야기하는 중</p>
@@ -257,7 +303,7 @@ export function ChatRoom({ creator, focusMomentId, initialMode = "ai" }: { creat
                 </button>
               </div>
             )}
-            <form onSubmit={send} className="flex items-end gap-2">
+            <form onSubmit={send} className={cn("flex items-end gap-2", activeMode === "ai" && noticeNeeded && "hidden")}>
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value.slice(0, MESSAGE_MAX))}

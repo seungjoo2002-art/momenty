@@ -15,6 +15,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { cleanupTestUsers, registerCleanup } from "./support/cleanup.mjs";
+import { acknowledgeAiNotice, makeAvatarReady } from "./support/avatarLive.mjs";
 import { chromium, type Page } from "playwright-core";
 
 process.loadEnvFile(".env.local");
@@ -119,7 +120,7 @@ try {
   const { data: cr, error: cErr } = await C.sb.from("creators").insert({ profile_id: C.uid, name: NAME, handle: `hx.${stamp}`, category: "music" }).select("id").single();
   if (cErr) throw cErr;
   const cid = cr.id as string;
-  await C.sb.from("creator_personas").insert({ creator_id: cid });
+  await makeAvatarReady(C.sb, cid);
   // Moment 5개 · 팬이 4개에 반응
   const ids: string[] = [];
   for (let i = 0; i < 5; i++) {
@@ -128,6 +129,7 @@ try {
   }
   {
     const { error } = await admin.from("subscriptions").insert({ fan_id: F.uid, creator_id: cid, tier: "subscriber" });
+    if (!error) await acknowledgeAiNotice(F.sb, cid);
     if (error) throw error;
     await W.sb.from("subscriptions").insert({ fan_id: W.uid, creator_id: cid, tier: "follow" });
   }
@@ -159,12 +161,18 @@ try {
     return [!FORBIDDEN.test(text) && !text.includes(SECRET) && !text.includes("10월 20일 생일"), text.match(FORBIDDEN)?.[0]];
   });
   await shot(cp, "fans");
+  /** v0.8.5: 팬 상세는 정보 · 대화 · 요약 탭 — 직접 대화 UI는 '대화' 탭 안에 있다 (새로고침하면 정보 탭으로 돌아간다) */
+  const openChatTab = () => cp.getByRole("tab", { name: "대화" }).click();
   await step("팬 상세: 있었던 일 · 공유 정보 없음 · 메모 · 직접 대화 없음", async () => {
     await cp.getByRole("link", { name: `${FAN} 팬 보기` }).click();
     await cp.waitForURL(new RegExp(`/studio/fans/${F.uid}`));
     await cp.getByText("있었던 일").waitFor();
     const t = await cp.locator("main").innerText();
-    return [t.includes("최근 Moment 5개 중 4개에 반응했어요.") && t.includes("구독 후 아직 직접 대화한 적이 없어요.") && t.includes("팬이 직접 공유한 정보가 없어요") && t.includes("아직 직접 주고받은 메시지가 없어요") && !t.includes(SECRET), t.slice(0, 500)];
+    // v0.8.5: 직접 대화는 '대화' 탭에 있다
+    await openChatTab();
+    await cp.getByText("아직 직접 주고받은 메시지가 없어요").waitFor();
+    await cp.getByRole("tab", { name: "정보" }).click();
+    return [t.includes("최근 Moment 5개 중 4개에 반응했어요.") && t.includes("구독 후 아직 직접 대화한 적이 없어요.") && t.includes("팬이 직접 공유한 정보가 없어요") && !t.includes(SECRET), t.slice(0, 500)];
   });
   await step("메모 저장 → DB(크리에이터 본인만) · 새로고침 후 유지", async () => {
     await cp.getByLabel("내 메모").fill("지난 라이브에서 기타 이야기함");
@@ -185,6 +193,7 @@ try {
   });
   await step("크리에이터가 먼저 직접 메시지 (Studio 상세)", async () => {
     lastPage = cp;
+    await openChatTab();
     await cp.getByLabel("직접 메시지").fill("안녕하세요, 직접 인사드려요!");
     await cp.getByRole("button", { name: "직접 보내기" }).click();
     await cp.getByText("안녕하세요, 직접 인사드려요!").waitFor();
@@ -273,6 +282,7 @@ try {
     await fp.getByRole("button", { name: "차단하기" }).click();
     await fp.getByText("차단한 크리에이터예요.").waitFor();
     lastPage = cp;
+    await openChatTab();
     await cp.getByLabel("직접 메시지").fill("차단 후 메시지");
     await cp.getByRole("button", { name: "직접 보내기" }).click();
     await cp.getByText("지금은 메시지를 보낼 수 없어요.").waitFor();
@@ -292,6 +302,7 @@ try {
     const composer = await cp.getByLabel("직접 메시지").count();
     await cp.getByRole("button", { name: "차단 해제" }).click();
     await cp.getByRole("dialog").getByRole("button", { name: "차단 해제" }).click();
+    await openChatTab();
     await cp.getByLabel("직접 메시지").waitFor();
     return [composer === 0, { composer }];
   });
@@ -301,6 +312,7 @@ try {
     await admin.from("subscriptions").update({ tier: "follow" }).eq("fan_id", F.uid).eq("creator_id", cid);
     lastPage = cp;
     await cp.reload();
+    await openChatTab();
     await cp.getByText("저도 반가워요! 오늘 기록 잘 봤어요").waitFor();
     await cp.getByText("지금 구독 중인 팬에게만 보낼 수 있어요.", { exact: false }).waitFor();
     lastPage = fp;

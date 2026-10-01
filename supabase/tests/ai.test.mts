@@ -13,6 +13,7 @@ import { randomBytes } from "node:crypto";
 import { createServerClient } from "@supabase/ssr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { cleanupTestUsers, registerCleanup } from "./support/cleanup.mjs";
+import { acknowledgeAiNotice, makeAvatarReady } from "./support/avatarLive.mjs";
 
 process.loadEnvFile(".env.local");
 if (!process.argv.includes("--confirm-dev")) {
@@ -216,11 +217,8 @@ try {
     premOn: await moment(X.sb, X.creatorId, "[ai-test] PREMIUM 비밀 · AI 허용", "premium", true),
     yPrem: await moment(Y.sb, Y.creatorId, "[ai-test] Y PREMIUM 비밀", "premium", true),
   };
-  // X는 Persona를 설정 (본인 세션) — Y는 설정하지 않는다
-  {
-    const { error } = await X.sb.from("creator_personas").insert({ creator_id: X.creatorId, formality: "casual", reply_length: "short", traits: ["warm"] });
-    if (error) throw error;
-  }
+  // X는 AI Avatar 준비 완료 + ON (본인 세션 · v0.8.5 — 기본정보 · 말투 학습 · 성향 · 대화 경계) — Y는 준비하지 않는다
+  await makeAvatarReady(X.sb, X.creatorId, { traits: ["warm"], defaultReply: (_m: string, i: number) => ["응 알겠어 ㅋㅋ", "오 진짜? 대박 ㅋㅋ", "헐 고마워!!", "그건 좀 비밀 ㅋㅋ 다른 얘기 하자", "나도 그래 ㅋㅋ 너는 어때?"][i % 5] });
   // 결제 서버 역할: S를 X의 subscriber로 (admin은 이 준비와 정리에만)
   {
     const { error } = await admin.from("subscriptions").insert({ fan_id: S.uid, creator_id: X.creatorId, tier: "subscriber" });
@@ -232,6 +230,14 @@ try {
     if (error) throw error;
   }
   console.log("준비: Creator X · Y, Fan S(subscriber) · F(follow), X의 Moment 4개 · Y의 premium 1개");
+
+  /* ---------- 0 · AI 대화 열람 안내 (v0.8.5) ---------- */
+  section("0 · AI 대화 열람 안내 확인 전 → 403 (모델 호출 없음)");
+  await step("구독자 S가 안내 확인 전 → 403 ai_notice_required", async () => {
+    const r = await chat({ creatorId: X.creatorId, message: "hi" }, S.cookie);
+    return [r.status === 403 && r.json.error?.code === "ai_notice_required" && !r.json.meta, { status: r.status, code: r.json.error?.code }];
+  });
+  await acknowledgeAiNotice(S.sb, X.creatorId);
 
   /* ---------- 서버 라우트 보호 ---------- */
   section("서버 라우트 보호 (proxy · Studio layout)");

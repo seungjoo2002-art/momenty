@@ -2,9 +2,10 @@
  * Persona Prompt Builder — 층(Layer)을 섞지 않고 순서대로 만든다.
  *
  *   1 SYSTEM         정체(○○ AI · 본인이 아님) · Truth Rule · 비공개 원칙 · 아래 층은 "데이터"라는 선언
- *   2 STYLE          말투 (존댓말/반말 · 길이 · ㅋㅋ/ㅎㅎ · 이모지 · 자주 쓰는 표현 · 분위기 · 예시 문장의 특징)
+ *   2 STYLE          말투 — 크리에이터가 직접 쓴 학습 답변에서 센 특징(존댓말/반말 · 길이 · ㅋㅋ/ㅎㅎ · 이모지 · 되묻기)
+ *                    + STYLE EXAMPLES (팬 메시지 → 크리에이터의 실제 답). 예시의 "내용"은 사실 근거가 아니다 (Fact와 Style 분리)
  *   3 PERSONALITY    성향
- *   4 VERIFIED FACTS 크리에이터가 확인한 사실 (사실로 말할 수 있는 1번 근거)
+ *   4 VERIFIED FACTS 크리에이터가 확인한 사실 · 기본정보 · 직업/활동 분야 (사실로 말할 수 있는 1번 근거)
  *   5 BOUNDARIES     허용 · 금지 주제
  *   6 TODAY CONTEXT  팬이 볼 수 있고 AI 참고가 허용된 오늘 Moment (사실로 말할 수 있는 2번 근거)
  *   7 FAN CONTEXT    FACTS ABOUT THIS FAN — 이 팬이 Memory를 켰을 때만, 관련 있는 것 최대 6개 (크리에이터 사실이 아니다)
@@ -29,18 +30,70 @@ import {
   type PersonaStyle,
   type Trait,
 } from "@/lib/persona";
+import { analyzeStyle, PROMPT_CATEGORY_LABEL, type PromptCategory, type SampleSource } from "@/lib/avatar";
 import { MOMENT_TYPE_LABEL } from "./labels";
 import type { ContextMoment } from "./context";
 import { MEMORY_CATEGORY_LABEL } from "@/lib/fanMemory";
 import type { FanMemoryContext } from "./memory";
 
+/** 말투 학습 답변 (STYLE 예시 — 사실 근거가 아니다) */
+export interface StyleSampleRecord {
+  situation: PromptCategory | "extra";
+  fan: string;
+  reply: string;
+  source: SampleSource;
+}
+
 /** ai_persona_context()가 돌려주는 값 */
 export interface PersonaRecord {
-  creator: { id: string; name: string; handle: string };
+  creator: { id: string; name: string; handle: string; job?: string };
   style: PersonaStyle;
   personality: { traits: Trait[] };
-  facts: { category: FactCategory; content: string }[];
+  facts: { category: FactCategory; content: string; undisclosed?: boolean }[];
   boundaries: Boundaries;
+  styleSamples?: StyleSampleRecord[];
+}
+
+/** Prompt에 넣는 학습 답변 수 (비용 · 문맥 제한). 크리에이터가 고친 답 · 추가 학습을 먼저, 그다음 상황별 하나씩 */
+export const STYLE_EXAMPLE_LIMIT = 24;
+
+export function pickStyleExamples(samples: StyleSampleRecord[], limit = STYLE_EXAMPLE_LIMIT): StyleSampleRecord[] {
+  const extra = samples.filter((s) => s.source !== "onboarding").slice(0, 8);
+  const seen = new Set<string>();
+  const firstPerSituation: StyleSampleRecord[] = [];
+  const rest: StyleSampleRecord[] = [];
+  for (const s of samples.filter((x) => x.source === "onboarding")) {
+    if (seen.has(s.situation)) rest.push(s);
+    else {
+      seen.add(s.situation);
+      firstPerSituation.push(s);
+    }
+  }
+  return [...extra, ...firstPerSituation, ...rest].slice(0, limit);
+}
+
+/**
+ * 학습 답변이 있으면 말투 설정(존댓말 · 길이 · 웃음 · 이모지)을 답변에서 센 값으로 바꾼다.
+ * 예전 Persona 말투 칸은 v0.8.5부터 앱에서 쓸 수 없다 — 학습 답변이 원본이다.
+ */
+export function applyLearnedStyle(persona: PersonaRecord): PersonaRecord {
+  const samples = persona.styleSamples ?? [];
+  if (!samples.length) return persona;
+  const p = analyzeStyle(samples.map((s) => s.reply));
+  const emojiLevel = (p.emoji < 0.1 ? 0 : p.emoji < 0.3 ? 1 : p.emoji < 0.6 ? 2 : 3) as PersonaStyle["emojiLevel"];
+  return {
+    ...persona,
+    style: {
+      formality: p.formality === "mixed" ? persona.style.formality : p.formality,
+      replyLength: p.replyLength,
+      laughKk: p.laughKk >= 0.15,
+      laughHh: p.laughHh >= 0.15,
+      emojiLevel,
+      phrases: [],
+      mood: "",
+      examples: [],
+    },
+  };
 }
 
 export interface ConversationTurn {
@@ -136,7 +189,7 @@ function systemLayer(p: PersonaRecord, decline: PersonaPromptInput["declineTopic
   return lines.join("\n");
 }
 
-function styleLayer(s: PersonaStyle) {
+function styleLayer(s: PersonaStyle, samples: StyleSampleRecord[]) {
   const laugh = [
     s.laughKk ? "ㅋㅋ를 가끔 쓴다" : "ㅋ(ㅋㅋ · ㅋㅋㅋ)는 절대 쓰지 않는다",
     s.laughHh ? "ㅎㅎ를 가끔 쓴다" : "ㅎ(ㅎㅎ · ㅎㅎㅎ)는 절대 쓰지 않는다",
@@ -151,17 +204,40 @@ function styleLayer(s: PersonaStyle) {
     s.examples.length
       ? `- 말투 예시 (문장을 그대로 반복하지 말고 어미 · 리듬 · 단어 선택만 참고):\n${s.examples.map((x) => `  · "${datum(x, 200)}"`).join("\n")}`
       : "",
+    samples.length ? styleExamplesBlock(samples) : "",
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+/** 크리에이터가 직접 쓴 답 — 말하는 방식만 배운다. 내용은 사실이 아니다 */
+function styleExamplesBlock(samples: StyleSampleRecord[]) {
+  const lines = pickStyleExamples(samples).map((x) => {
+    const label = x.situation === "extra" ? "추가 학습" : PROMPT_CATEGORY_LABEL[x.situation];
+    return `  · [${label}] 팬: "${datum(x.fan, 120)}" → 나: "${datum(x.reply, 200)}"`;
+  });
+  return [
+    "- STYLE EXAMPLES — 크리에이터가 팬 메시지에 직접 쓴 답이다. 어미 · 길이 · 웃음 · 이모지 · 되묻는 방식 · 공감 · 장난 강도 · 거절하는 방식을 배운다.",
+    "- 이 예시 속 내용(먹은 것 · 좋아하는 것 · 장소 · 일정 · 경험 · 관계)은 사실이 아니다. 사실은 VERIFIED FACTS와 TODAY CONTEXT로만 말한다. 예시 문장을 그대로 복사하지 않는다.",
+    "- 위치 · 연애 · 민감한 질문에 대한 예시는 '어떻게 피하고 거절하는지'만 참고한다. BOUNDARIES가 항상 우선이다.",
+    ...lines,
+  ].join("\n");
 }
 
 function personalityLayer(traits: Trait[]) {
   return traits.length ? `- ${traits.map((t) => TRAIT_LABEL[t]).join(", ")} 성향으로 대화한다.` : "- 특별히 정해진 성향 없음. 자연스럽고 다정하게.";
 }
 
-function factsLayer(facts: PersonaRecord["facts"]) {
-  return facts.length ? facts.map((f) => `- [${FACT_CATEGORY_LABEL[f.category]}] ${datum(f.content, 300)}`).join("\n") : "- (확인된 사실 없음 — 개인적인 질문에는 기록이 없다고 말한다)";
+function factsLayer(facts: PersonaRecord["facts"], job?: string) {
+  const lines = [
+    ...(job?.trim() ? [`- [프로필] 직업/활동 분야: ${datum(job, 40)}`] : []),
+    ...facts.map((f) =>
+      f.undisclosed
+        ? `- [${FACT_CATEGORY_LABEL[f.category]}] ${datum(f.content, 300)} → 공개하지 않기로 한 주제다. 물으면 말하지 않기로 했다고 부드럽게 답하고 추측하지 않는다.`
+        : `- [${FACT_CATEGORY_LABEL[f.category]}] ${datum(f.content, 300)}`,
+    ),
+  ];
+  return lines.length ? lines.join("\n") : "- (확인된 사실 없음 — 개인적인 질문에는 기록이 없다고 말한다)";
 }
 
 function boundariesLayer(b: Boundaries) {
@@ -218,9 +294,9 @@ export function buildPersonaPrompt(input: PersonaPromptInput): PersonaPrompt {
 
   const layers: Record<LayerName, string> = {
     system: systemLayer(persona, declineTopic, memoryOn),
-    style: styleLayer(persona.style),
+    style: styleLayer(persona.style, persona.styleSamples ?? []),
     personality: personalityLayer(persona.personality.traits),
-    facts: declineTopic ? "- (이번 메시지에는 쓰지 않음)" : factsLayer(persona.facts),
+    facts: declineTopic ? "- (이번 메시지에는 쓰지 않음)" : factsLayer(persona.facts, persona.creator.job),
     boundaries: boundariesLayer(persona.boundaries),
     today: `오늘(${input.nowLabel} 기준) 내가(${persona.creator.name}) 남긴 기록 중 이 팬이 볼 수 있고 AI 참고를 허용한 것 — 모두 이미 지난 순간이다. 말할 때는 "내가 ~했어", "~하는 중이었어"처럼 1인칭 · 과거형으로 ("지금 ~하는 중이야" X):\n${today}`,
     fan: fanLayer(input.fanMemory, !!declineTopic),

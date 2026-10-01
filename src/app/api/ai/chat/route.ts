@@ -4,7 +4,7 @@
  *   1. 인증        쿠키 세션 → Auth 서버 검증(getUser) · 다른 Origin 거부           401 · 403
  *   2. 입력 검증    zod strict (정의 밖 필드 거부)                                  400
  *   3. 권한        ai_persona_context(서버 키, creatorId) — DB가 판단                404 · 403
- *                  (존재 · 본인 채널 아님 · Persona ON · 설정됨 · subscriber/premium)
+ *                  (존재 · 본인 채널 아님 · 차단 · AI ON · Avatar 준비 · subscriber/premium · 열람 안내 확인)
  *   4. 횟수 제한    consume_ai_rate_limit(서버 키, creatorId) — Postgres 공유 카운터    429
  *   5. Context     팬 세션 + RLS로 볼 수 있고 AI 참고 허용된 오늘 Moment · focus Moment · 최근 대화
  *                  + Fan Memory(ai_fan_memory_context — 팬이 켰을 때만, 이 크리에이터 AI에 대한 것만, 최대 6개)
@@ -25,7 +25,7 @@ import { auditAi, type AiAuditEvent, type AiResponseMeta } from "@/lib/ai/audit"
 import { AiConfigError, getAiServerKey } from "@/lib/ai/config";
 import { contextTypesOf, createContextBuilder, loadPersona, loadRecentConversation, PersonaAccessError, type PersonaDenial } from "@/lib/ai/context";
 import { fallbackReply, postcheck, postFallbackReply, precheck, type GuardTopic } from "@/lib/ai/guard";
-import { buildPersonaPrompt, CONVERSATION_WINDOW, parseModelOutput } from "@/lib/ai/prompt";
+import { applyLearnedStyle, buildPersonaPrompt, CONVERSATION_WINDOW, parseModelOutput } from "@/lib/ai/prompt";
 import { filterMemoryCandidates, loadFanMemory, saveFanMemories, type FanMemoryContext } from "@/lib/ai/memory";
 import { getPersonaProvider, ProviderError } from "@/lib/ai/provider";
 import { aiRateLimiter } from "@/lib/ai/rateLimit";
@@ -46,6 +46,7 @@ const MESSAGES = {
   own_channel: "내 채널의 Creator AI와는 대화할 수 없어요.",
   subscription_required: "Creator AI 대화는 구독자에게 열려요.",
   blocked: "지금은 이 크리에이터와 대화할 수 없어요.",
+  ai_notice_required: "AI Avatar와 대화하기 전에 안내를 확인해 주세요.",
   rate_limited: "잠시 후 다시 시도해 주세요.",
   ai_unavailable: "Creator AI가 잠시 답할 수 없어요. 잠시 후 다시 시도해 주세요.",
   error: "잠시 후 다시 시도해 주세요.",
@@ -102,7 +103,8 @@ export async function POST(req: NextRequest) {
     // 3. 권한 + Persona (DB가 판단 · 팬의 JWT + 서버 키)
     let persona;
     try {
-      persona = await loadPersona(sb, serverKey, input.creatorId);
+      // 말투는 크리에이터가 직접 쓴 학습 답변에서 (예전 설정 칸보다 우선)
+      persona = applyLearnedStyle(await loadPersona(sb, serverKey, input.creatorId));
     } catch (e) {
       if (e instanceof PersonaAccessError) {
         const status = e.code === "creator_not_found" ? 404 : 403;

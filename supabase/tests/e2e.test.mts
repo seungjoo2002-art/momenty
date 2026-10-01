@@ -191,10 +191,10 @@ try {
   });
 
   section("Creator A · 프로필");
-  await step("앱 createCreatorProfile: 이름 · 사용자 이름 · 소개 · 카테고리 · 프로필 사진(Storage)", async () => {
-    const c = await creators.createCreatorProfile({ name: "E2E 크리에이터 A", handle, bio: "E2E 테스트용 크리에이터", category: "art", avatarFile: pngBlob() });
+  await step("앱 createCreatorProfile: 이름 · 아이디 · 직업 · 소개 · 카테고리 · 프로필 사진(Storage)", async () => {
+    const c = await creators.createCreatorProfile({ name: "E2E 크리에이터 A", handle, job: "작가", bio: "E2E 테스트용 크리에이터", category: "art", avatarFile: pngBlob() });
     creatorId = c.id;
-    return [c.handle === handle && c.profileId === aUid && c.avatarUrl.includes(`/avatars/${aUid}/`), { id: c.id, avatar: c.avatarUrl.replace(/^.*\/avatars\//, "avatars/") }];
+    return [c.handle === handle && c.job === "작가" && c.profileId === aUid && c.avatarUrl.includes(`/avatars/${aUid}/`), { id: c.id, job: c.job, avatar: c.avatarUrl.replace(/^.*\/avatars\//, "avatars/") }];
   });
   await step("프로필 사진 공개 URL → 200 · PNG", async () => {
     const c = (await creators.getMyCreator())!;
@@ -212,16 +212,16 @@ try {
     return [acc.creator?.id === creatorId && auth.nextPathFor(acc) === "/studio", auth.nextPathFor(acc)];
   });
   await step("잘못된 형식의 프로필 사진(gif) → 업로드 전에 거부", async () => {
-    const [ok, detail] = await rejects(() => creators.updateCreatorProfile(creatorId, { name: "E2E 크리에이터 A", handle, bio: "x", category: "art", avatarFile: new Blob(["GIF89a"], { type: "image/gif" }) }));
+    const [ok, detail] = await rejects(() => creators.updateCreatorProfile(creatorId, { name: "E2E 크리에이터 A", handle, job: "작가", bio: "x", category: "art", avatarFile: new Blob(["GIF89a"], { type: "image/gif" }) }));
     return [ok && String(detail).includes("지원하지 않는 형식"), detail];
   });
   await step("프로필 수정 + 사진 교체 → 예전 사진 파일 삭제", async () => {
     const before = (await creators.getMyCreator())!;
     const oldPath = before.avatarUrl.replace(/^.*\/avatars\//, "").split("?")[0];
-    const after = await creators.updateCreatorProfile(creatorId, { name: "E2E 크리에이터 A", handle, bio: "수정한 소개", category: "art", avatarFile: pngBlob([255, 180, 0]) });
+    const after = await creators.updateCreatorProfile(creatorId, { name: "E2E 크리에이터 A", handle, job: "작가 · 사진가", bio: "수정한 소개", category: "art", avatarFile: pngBlob([255, 180, 0]) });
     const { data: files } = await admin.storage.from("avatars").list(aUid);
     const names = (files ?? []).map((f) => `${aUid}/${f.name}`);
-    return [after.bio === "수정한 소개" && after.avatarUrl !== before.avatarUrl && !names.includes(oldPath) && names.length === 1, { names, oldPath }];
+    return [after.bio === "수정한 소개" && after.job === "작가 · 사진가" && after.avatarUrl !== before.avatarUrl && !names.includes(oldPath) && names.length === 1, { names, oldPath }];
   });
 
   section("Creator A · Moment 기록");

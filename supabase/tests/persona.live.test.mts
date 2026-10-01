@@ -11,6 +11,7 @@
 import { randomBytes } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { cleanupTestUsers, registerCleanup } from "./support/cleanup.mjs";
+import { acknowledgeAiNotice, makeAvatarReady } from "./support/avatarLive.mjs";
 
 process.loadEnvFile(".env.local");
 if (!process.argv.includes("--confirm-dev")) {
@@ -119,7 +120,12 @@ try {
   });
 
   section("Persona · Facts · Boundaries RLS");
-  const persona = { creator_id: cx, formality: "casual", reply_length: "short", laugh_kk: true, emoji_level: 1, phrases: ["오늘도 무사히"], mood: "편안한", example_messages: ["오늘 좀 걸었어 ㅋㅋ"], traits: ["warm", "playful"] };
+  // v0.8.5: 말투(Style)는 학습 답변이 원본 — Persona 행에는 성향(traits)만 쓸 수 있다
+  const persona = { creator_id: cx, traits: ["warm", "playful"] };
+  await step("v0.8.5 말투 칸(formality 등) 직접 insert → 거부 (컬럼 권한)", async () => {
+    const { error } = await X.sb.from("creator_personas").insert({ creator_id: cx, formality: "casual", laugh_kk: true });
+    return [denied(error, /42501|permission/), error?.message];
+  });
   await step("팬이 크리에이터 Persona 생성 → RLS 거부", async () => {
     const { error } = await S.sb.from("creator_personas").insert(persona);
     return [denied(error, /42501|row-level security/), error?.message];
@@ -175,7 +181,12 @@ try {
     const { error } = await X.sb.from("creator_boundaries").upsert({ creator_id: cx, topic: "jokes", allowed: false });
     return [denied(error, /42501|permission/), error?.message];
   });
-  await step("persona_enabled: 다른 크리에이터 0행 · 본인 가능", async () => {
+  await step("v0.8.5 준비 전(기본정보 · 말투 학습 없음) AI 문답 ON → avatar_not_ready", async () => {
+    const { error } = await X.sb.from("creators").update({ persona_enabled: true }).eq("id", cx);
+    return [denied(error, /avatar_not_ready/), error?.message];
+  });
+  await makeAvatarReady(X.sb, cx, { traits: ["warm", "playful"], defaultReply: (_m: string, i: number) => ["오늘 좀 걸었어 ㅋㅋ", "응 알겠어 ㅋㅋ", "헐 고마워!!"][i % 3] });
+  await step("persona_enabled: 다른 크리에이터 0행 · 준비 완료 후 본인 가능", async () => {
     const other = await Y.sb.from("creators").update({ persona_enabled: false }).eq("id", cx).select("id");
     const own = await X.sb.from("creators").update({ persona_enabled: true }).eq("id", cx).select("id");
     return [other.data?.length === 0 && own.data?.length === 1, [other.error ?? other.data?.length, own.error ?? own.data?.length]];
@@ -183,7 +194,9 @@ try {
 
   section("Fact 50개 제한 (실제 DB)");
   await step("비활성 Fact를 활성 50개 위로 켜는 공격 → 거부", async () => {
-    const rows = Array.from({ length: 49 }, (_, i) => ({ creator_id: cx, content: `pl 활성 ${i}` }));
+    // 지금 활성 (초밥 + v0.8.5 기본정보 6개) → 50개까지 채운다
+    const { count: base } = await X.sb.from("creator_facts").select("*", { count: "exact", head: true }).eq("creator_id", cx).eq("active", true);
+    const rows = Array.from({ length: 50 - (base ?? 0) }, (_, i) => ({ creator_id: cx, content: `pl 활성 ${i}` }));
     const ins = await X.sb.from("creator_facts").insert(rows);
     if (ins.error) throw ins.error;
     const over = await X.sb.from("creator_facts").insert({ creator_id: cx, content: "51번째" });
@@ -218,18 +231,24 @@ try {
   });
   await step("Persona 미설정 크리에이터(Y) → 거부", async () => {
     const { error } = await ctx(S.sb, SERVER_KEY, cy);
-    return [denied(error, /persona_not_configured|subscription_required/), error?.message];
+    return [denied(error, /persona_disabled|persona_not_configured|subscription_required/), error?.message];
   });
+  await step("v0.8.5 구독자가 AI 대화 열람 안내 확인 전 → ai_notice_required", async () => {
+    const { error } = await ctx(S.sb, SERVER_KEY);
+    return [denied(error, /ai_notice_required/), error?.message];
+  });
+  await acknowledgeAiNotice(S.sb, cx);
   await step("구독자 + 실제 서버 키 → Persona Context (등록한 해시와 일치)", async () => {
     const { data, error } = await ctx(S.sb, SERVER_KEY);
+    const own = (data?.facts ?? []).filter((f: { content: string }) => !/: 공개하지 않음$/.test(f.content));
     return [
-      !error && data.style.formality === "casual" && data.facts.length === 1 && data.facts[0].content === "좋아하는 음식은 초밥" && data.boundaries.jokes === true && data.boundaries.current_location === false,
+      !error && data.styleSamples.length >= 32 && own.length === 1 && own[0].content === "좋아하는 음식은 초밥" && data.boundaries.jokes === true && data.boundaries.current_location === false,
       error ?? data,
     ];
   });
-  await step("Fact에는 분류 · 내용만 (출처 · 시각 없음)", async () => {
+  await step("Fact에는 분류 · 내용 · 공개 여부만 (출처 · 시각 없음) · 학습 답변은 Fact가 아님", async () => {
     const { data } = await ctx(S.sb, SERVER_KEY);
-    return [Object.keys(data.facts[0]).sort().join() === "category,content", data.facts[0]];
+    return [Object.keys(data.facts[0]).sort().join() === "category,content,undisclosed" && !data.facts.some((f: { content: string }) => f.content.includes("ㅋㅋ")), data.facts[0]];
   });
   await step("Persona OFF → persona_disabled", async () => {
     await X.sb.from("creators").update({ persona_enabled: false }).eq("id", cx);

@@ -8,6 +8,7 @@ import { loginHref } from "@/components/auth/Gates";
 import { Button } from "@/components/ui/Button";
 import { follow, unfollow } from "@/lib/services/fan";
 import type { Tier } from "@/lib/types";
+import { cn } from "@/lib/utils/cn";
 
 /**
  * 무료 팔로우 토글 — public.subscriptions에 실제로 저장된다 (RLS: 본인 · tier = follow만).
@@ -51,10 +52,19 @@ export function FollowButton({
   }
 
   return (
-    <span className={className}>
-      <Button variant={following ? "secondary" : variant} size={size} onClick={toggle} disabled={pending} aria-pressed={following} block>
+    <span className={cn("shrink-0", className)}>
+      {/* 좁은 화면에서도 "팔로잉"이 두 줄로 나뉘지 않게: 줄바꿈 금지 + 최소 폭 (고정 폭을 두지 않는다) */}
+      <Button
+        variant={following ? "secondary" : variant}
+        size={size}
+        onClick={toggle}
+        disabled={pending}
+        aria-pressed={following}
+        block
+        className={cn("whitespace-nowrap", size === "sm" ? "min-w-[5.75rem] px-3" : "min-w-[6.5rem]")}
+      >
         {pending ? <Loader2 className="size-4 animate-spin" /> : following && <Check className="size-4" />}
-        {following ? "팔로잉" : "팔로우"}
+        <span>{following ? "팔로잉" : "팔로우"}</span>
       </Button>
       {error && (
         <span role="alert" className="mt-1.5 block text-meta text-danger">

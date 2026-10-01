@@ -10,6 +10,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
+import { avatarReadySql } from "./support/avatarFixture.mjs";
 
 const MIGRATIONS = join(import.meta.dirname, "..", "migrations");
 const SUPABASE_STUB = `
@@ -91,13 +92,15 @@ await db.exec(`
   insert into public.creators (id, profile_id, name, handle, category) values
     ('c1', '${U.creatorA}', '지훈', 'jihoon', 'sports'),
     ('c2', '${U.creatorB}', '도현', 'dohyun', 'music');
-  insert into public.creator_personas (creator_id) values ('c1'), ('c2');
   insert into public.subscriptions (fan_id, creator_id, tier) values
     ('${U.sub}', 'c1', 'subscriber'), ('${U.premium}', 'c1', 'premium'), ('${U.follower}', 'c1', 'follow'),
     ('${U.fan4}', 'c1', 'subscriber'), ('${U.fan5}', 'c1', 'subscriber'),
     ('${U.sub}', 'c2', 'subscriber');
   insert into private.admin_users (user_id) values ('${U.admin}');
 `);
+// v0.8.5: AI Avatar 준비 완료 + ON · 팬의 AI 대화 열람 고지 확인 (v0.8 검사의 전제)
+await db.exec(avatarReadySql("c1", [U.sub, U.premium, U.follower, U.fan4, U.fan5]));
+await db.exec(avatarReadySql("c2", [U.sub]));
 const insMoment = `insert into public.moments (creator_id, type, content, visibility, media_url) values ($1, $2, $3, $4, $5) returning id, created_at, visible_at`;
 const mediaObj = async (path) => db.query(`insert into storage.objects (bucket_id, name) values ('moment-media', $1)`, [path]);
 

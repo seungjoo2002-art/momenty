@@ -20,7 +20,7 @@ export default function ProfileSettingsPage() {
         <CreatorProfileForm
           key={creator.id}
           creatorId={creator.id}
-          initial={{ name: creator.name, handle: creator.handle, bio: creator.bio, category: creator.category, avatarUrl: creator.avatarUrl }}
+          initial={{ name: creator.name, handle: creator.handle, job: creator.job, bio: creator.bio, category: creator.category, avatarUrl: creator.avatarUrl }}
           submitLabel="저장"
           onSubmit={async (input) => {
             await updateCreatorProfile(creator.id, input);

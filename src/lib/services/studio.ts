@@ -74,3 +74,32 @@ export async function getStudioStats(creatorId: string): Promise<StudioStats> {
       .slice(0, 3),
   };
 }
+
+/* ---------- v0.8.5 날짜별 통계 (creator_analytics — 실제 행 수만) ---------- */
+
+export interface AnalyticsDay {
+  date: string;
+  /** 그날 기록한 Moment (공개 예정 포함) */
+  moments: number;
+  /** 그날 받은 반응 (반응 시각 기준) */
+  reactions: number;
+  /** 그날 시작된 팔로우 · 구독 관계 (지금 유지 중인 관계 기준 — 취소 이력은 저장하지 않는다) */
+  newFollowers: number;
+  /** 그날 팬이 AI Avatar에게 보낸 메시지 수 · 팬 수 (합계만) */
+  aiMessages: number;
+  aiFans: number;
+}
+
+export interface Analytics {
+  from: string;
+  to: string;
+  days: AnalyticsDay[];
+}
+
+export const ANALYTICS_MAX_DAYS = 93;
+
+export async function getCreatorAnalytics(from: string, to: string): Promise<Analytics> {
+  const { data, error } = await supabase().rpc("creator_analytics", { p_from: from, p_to: to });
+  if (error) throw toServiceError(error, "통계를 불러오지 못했어요.");
+  return data as Analytics;
+}

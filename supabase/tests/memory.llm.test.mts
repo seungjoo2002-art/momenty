@@ -25,6 +25,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { createServerClient } from "@supabase/ssr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { cleanupTestUsers, registerCleanup } from "./support/cleanup.mjs";
+import { acknowledgeAiNotice, makeAvatarReady } from "./support/avatarLive.mjs";
 
 process.loadEnvFile(".env.local");
 if (!process.argv.includes("--confirm-dev")) {
@@ -140,10 +141,8 @@ try {
     const { data, error } = await u.sb.from("creators").insert({ profile_id: u.uid, name, handle: `mem${tag}.${stamp}`, category: "sports" }).select("id").single();
     if (error) throw error;
     const id = data.id as string;
-    const { error: pErr } = await u.sb.from("creator_personas").insert({
-      creator_id: id, formality: "casual", reply_length: "short", laugh_kk: true, laugh_hh: false, emoji_level: 1, phrases: [], mood: "밝은", example_messages: [], traits: ["bright"],
-    });
-    if (pErr) throw pErr;
+    // v0.8.5: 말투는 학습 답변으로 (반말 · 짧게 · ㅋㅋ O)
+    await makeAvatarReady(u.sb, id, { traits: ["bright"], defaultReply: (_m: string, i: number) => ["응 알겠어 ㅋㅋ", "오 진짜? 대박 ㅋㅋ", "헐 고마워!!", "그건 좀 비밀 ㅋㅋ 다른 얘기 하자", "나도 그래 ㅋㅋ 너는 어때?"][i % 5] });
     return id;
   };
   const cp = await mkCreator(P, "하늘", "p");
@@ -154,6 +153,7 @@ try {
   for (const c of [cp, cr]) {
     const { error } = await admin.from("subscriptions").insert({ fan_id: S.uid, creator_id: c, tier: "subscriber" });
     if (error) throw error;
+    await acknowledgeAiNotice(S.sb, c);
   }
   console.log(`준비: 크리에이터 하늘(P) · 도현(R), 구독 팬 S · 모델 ${process.env.AI_MODEL}`);
 

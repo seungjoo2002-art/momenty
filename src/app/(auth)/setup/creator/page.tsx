@@ -27,7 +27,7 @@ export default function CreatorSetupPage() {
         <h1 className="mt-2 text-title leading-snug font-bold">크리에이터 프로필</h1>
         <p className="mt-1.5 mb-7 text-body text-muted">팬이 나를 알아볼 수 있도록 알려 주세요.</p>
         <CreatorProfileForm
-          initial={{ name: account.nickname, handle: "", bio: "", category: "", avatarUrl: account.avatarUrl }}
+          initial={{ name: account.nickname, handle: "", job: "", bio: "", category: "", avatarUrl: account.avatarUrl }}
           submitLabel="Studio 시작하기"
           onSubmit={async (input) => {
             await createCreatorProfile(input);

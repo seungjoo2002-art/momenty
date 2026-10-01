@@ -1,6 +1,6 @@
 "use client";
 
-import { Ban, Bell, Brain, ChevronRight, CreditCard, Flag, HelpCircle, Loader2, LogOut, Repeat, ShieldCheck, UserX } from "lucide-react";
+import { Ban, Bell, Bot, Brain, ChevronRight, CreditCard, Flag, HelpCircle, Loader2, LogOut, Repeat, ShieldCheck, UserX } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -95,6 +95,7 @@ export default function MyPage() {
         <SectionHeader title="개인정보 및 안전" />
         <ListGroup>
           <ListRow href="/my/memory" icon={<Brain className="size-[18px]" />} label="AI Memory" description="Creator AI가 기억하는 나 · 보기와 삭제" />
+          <ListRow href="/my/ai-sharing" icon={<Bot className="size-[18px]" />} label="AI Avatar 대화 열람" description="크리에이터가 볼 수 있는 AI 대화 · 확인 취소" />
           <ListRow href="/my/blocked" icon={<Ban className="size-[18px]" />} label="차단한 계정" description="차단 목록 · 차단 해제" />
           <ListRow href="/my/safety" icon={<ShieldCheck className="size-[18px]" />} label="SafeShare 안내" description="크리에이터의 하루를 안전하게 나누는 방법" />
           <ListRow href="/my/account/delete" icon={<UserX className="size-[18px]" />} label="계정 삭제" />

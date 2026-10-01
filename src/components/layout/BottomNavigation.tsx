@@ -35,7 +35,7 @@ export function BottomNavigation({ mode }: { mode: "fan" | "creator" }) {
   return (
     <>
       {/* 콘텐츠가 탭에 가리지 않도록 여백 */}
-      <div className="h-[calc(76px+env(safe-area-inset-bottom))]" aria-hidden />
+      <div className="h-(--bottom-nav-space)" aria-hidden />
 
       <nav className="fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-[430px] border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] shadow-nav backdrop-blur-lg">
         <ul className="grid h-[58px] grid-cols-5">

@@ -15,7 +15,7 @@ import { createClient } from "@supabase/supabase-js";
 
 process.loadEnvFile(".env.local");
 const db = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false, autoRefreshToken: false } });
-const TEST_EMAIL = /^momenty-(e2e|ui|mem|hl|sl|hx|sx|dx|lt|pl|hard|hdbg|llm|loop|ai|cui|pui|rt)-[a-z0-9-]+@gmail\.com$/;
+const TEST_EMAIL = /^momenty-(e2e|ui|mem|hl|sl|hx|sx|dx|lt|pl|hard|hdbg|llm|loop|ai|cui|pui|rt|ax|av)-[a-z0-9-]+@gmail\.com$/;
 
 const users = [];
 for (let page = 1; ; page++) {

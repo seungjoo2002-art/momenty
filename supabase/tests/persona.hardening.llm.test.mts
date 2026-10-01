@@ -14,6 +14,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { createServerClient } from "@supabase/ssr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { cleanupTestUsers, registerCleanup } from "./support/cleanup.mjs";
+import { acknowledgeAiNotice, makeAvatarReady } from "./support/avatarLive.mjs";
 
 process.loadEnvFile(".env.local");
 if (!process.argv.includes("--confirm-dev")) {
@@ -107,11 +108,8 @@ try {
   if (cErr) throw cErr;
   const cp = c.id as string;
   // laugh_kk=true · laugh_hh=false (지난 실행에서 ㅎㅎ가 섞였던 설정 그대로)
-  const { error: pErr } = await P.sb.from("creator_personas").insert({
-    creator_id: cp, formality: "casual", reply_length: "short", laugh_kk: true, laugh_hh: false, emoji_level: 1,
-    phrases: ["오늘도 달려보자"], mood: "밝고 장난스러운", example_messages: ["오늘 진짜 개운하다 ㅋㅋ", "헐 대박 고마워!!"], traits: ["playful", "bright"],
-  });
-  if (pErr) throw pErr;
+  // v0.8.5: 말투는 학습 답변으로 (반말 · 짧게 · ㅋㅋ O · ㅎㅎ X)
+  await makeAvatarReady(P.sb, cp, { traits: ["playful", "bright"], defaultReply: (_m: string, i: number) => ["응 알겠어 ㅋㅋ", "오 진짜? 대박 ㅋㅋ", "헐 고마워!!", "그건 좀 비밀 ㅋㅋ 다른 얘기 하자", "나도 그래 ㅋㅋ 너는 어때?"][i % 5] });
   // current_location은 기본값(금지) 그대로
   const moment = async (content: string, location: string | null) => {
     const { data, error } = await P.sb.from("moments").insert({ creator_id: cp, type: "text", content, location, visibility: "public", ai_context_enabled: true }).select("id").single();
@@ -122,6 +120,7 @@ try {
   const cafe = await moment("라떼 한 잔 하면서 편집 작업", "성수동 · 카페 온도");
   const { error: sErr } = await admin.from("subscriptions").insert({ fan_id: S.uid, creator_id: cp, tier: "subscriber" });
   if (sErr) throw sErr;
+  await acknowledgeAiNotice(S.sb, cp);
   console.log(`준비: 크리에이터 하늘(반말 · ㅋㅋ O · ㅎㅎ X · current_location 금지), 구독 팬 S · 모델 ${process.env.AI_MODEL}`);
 
   console.log("\n[H1 · focus Moment — 1인칭 · ㅎ 없음]");

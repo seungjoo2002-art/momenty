@@ -7,6 +7,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
+import { avatarReadySql } from "./support/avatarFixture.mjs";
 
 const MIGRATIONS = join(import.meta.dirname, "..", "migrations");
 
@@ -358,16 +359,20 @@ await db.exec(`
 `);
 
 console.log("\nv0.5 · Persona 설정 테이블 (크리에이터 본인만)");
-const personaSql = `insert into public.creator_personas (creator_id, formality, reply_length, laugh_kk, emoji_level, phrases, mood, example_messages, traits)
-  values ($1, 'casual', 'short', true, 2, '{"오늘도 화이팅"}', '따뜻한', '{"안녕 ㅋㅋ 오늘 날씨 좋다"}', '{"warm","playful"}')`;
+// v0.8.5: 말투(Style)는 학습 답변이 원본 — 예전 말투 칸은 앱에서 쓸 수 없고, 성향(traits)만 본인이 고른다
+const personaSql = `insert into public.creator_personas (creator_id, traits) values ($1, '{"warm","playful"}')`;
 check("다른 크리에이터가 c1 Persona 생성 → RLS 거부", await failsWith(U.creatorB, personaSql, ["c1"], /row-level security/));
 check("팬이 c1 Persona 생성 → RLS 거부", await failsWith(U.premium, personaSql, ["c1"], /row-level security/));
+check("v0.8.5 말투 칸(formality · phrases …) 직접 insert → 거부 (컬럼 권한)",
+  await failsWith(U.creatorA, `insert into public.creator_personas (creator_id, formality, laugh_kk) values ('c1', 'casual', true)`, [], /permission denied/));
 check("크리에이터 본인 Persona 생성 → 성공", !(await fails(U.creatorA, personaSql, ["c1"])));
 check("팬(Premium)은 Persona 원본을 읽을 수 없음 (0행)", (await count(U.premium, `select * from public.creator_personas`)) === 0);
 check("다른 크리에이터도 읽을 수 없음 (0행)", (await count(U.creatorB, `select * from public.creator_personas`)) === 0);
 check("비로그인 읽기 → 거부", await fails(null, `select * from public.creator_personas`));
-check("본인은 읽기 · 수정 가능", (await as(U.creatorA, `update public.creator_personas set mood = '차분한' where creator_id = 'c1' returning 1`)).rows.length === 1);
-check("다른 크리에이터 수정 → 0행", (await as(U.creatorB, `update public.creator_personas set mood = 'x' where creator_id = 'c1' returning 1`)).rows.length === 0);
+check("본인은 읽기 · 성향 수정 가능", (await as(U.creatorA, `update public.creator_personas set traits = '{"calm"}' where creator_id = 'c1' returning 1`)).rows.length === 1);
+check("다른 크리에이터 수정 → 0행", (await as(U.creatorB, `update public.creator_personas set traits = '{"shy"}' where creator_id = 'c1' returning 1`)).rows.length === 0);
+check("v0.8.5 본인도 말투 칸 직접 수정 → 거부 (컬럼 권한)", await failsWith(U.creatorA, `update public.creator_personas set mood = '차분한' where creator_id = 'c1'`, [], /permission denied/));
+await as(U.creatorA, `update public.creator_personas set traits = '{"warm","playful"}' where creator_id = 'c1'`);
 check("허용되지 않은 성향 값 → 거부", await fails(U.creatorA, `update public.creator_personas set traits = '{"evil"}' where creator_id = 'c1'`));
 check("자주 쓰는 표현 11개 → 거부", await fails(U.creatorA, `update public.creator_personas set phrases = array_fill('ㅋ'::text, array[11]) where creator_id = 'c1'`));
 check("표현 한 개가 41자 → 거부", await fails(U.creatorA, `update public.creator_personas set phrases = array[repeat('가', 41)] where creator_id = 'c1'`));
@@ -399,6 +404,10 @@ check("정의 밖 topic → 거부", await fails(U.creatorA, `insert into public
 check("다른 크리에이터가 c1 Boundary 설정 → RLS 거부", await failsWith(U.creatorB, `insert into public.creator_boundaries (creator_id, topic, allowed) values ('c1', 'sexual', true)`, [], /row-level security/));
 check("팬은 Boundary 원본을 읽을 수 없음", (await count(U.premium, `select * from public.creator_boundaries`)) === 0);
 check("다른 크리에이터가 c1 persona_enabled 끄기 → 0행", (await as(U.creatorB, `update public.creators set persona_enabled = false where id = 'c1' returning 1`)).rows.length === 0);
+check("v0.8.5 준비 전(기본정보 · 말투 학습 없음) persona_enabled 켜기 → avatar_not_ready",
+  await failsWith(U.creatorA, `update public.creators set persona_enabled = true where id = 'c1'`, [], /avatar_not_ready/));
+// v0.8.5: 이후 v0.5 검사의 전제 — c1 AI Avatar 준비 완료 + 구독 팬들의 열람 고지 확인
+await db.exec(avatarReadySql("c1", [U.subscriber, U.premium, U.follower]));
 check("본인이 persona_enabled 끄기/켜기 → 성공",
   (await as(U.creatorA, `update public.creators set persona_enabled = false where id = 'c1' returning 1`)).rows.length === 1 &&
   (await as(U.creatorA, `update public.creators set persona_enabled = true where id = 'c1' returning 1`)).rows.length === 1);
@@ -410,13 +419,14 @@ check("서버 키 없이 (구독자 JWT만) → server_key_required", await fail
 check("틀린 서버 키 → server_key_required", await failsWith(U.subscriber, ctxSql, ["wrong-key-wrong-key-wrong-key-wrong-key", "c1"], /server_key_required/));
 check("무료 팔로워 → subscription_required", await failsWith(U.follower, ctxSql, [KEY, "c1"], /subscription_required/));
 check("크리에이터 본인 → own_channel", await failsWith(U.creatorA, ctxSql, [KEY, "c1"], /own_channel/));
-check("Persona 미설정 크리에이터(c2) → persona_not_configured", await failsWith(U.subscriber, ctxSql, [KEY, "c2"], /persona_not_configured/));
+check("AI 준비 전 크리에이터(c2 · 꺼져 있음) → persona_disabled", await failsWith(U.subscriber, ctxSql, [KEY, "c2"], /persona_disabled/));
 check("없는 크리에이터 → creator_not_found", await failsWith(U.subscriber, ctxSql, [KEY, "nobody"], /creator_not_found/));
 {
   const ctx = (await as(U.subscriber, ctxSql, [KEY, "c1"])).rows[0]?.ctx;
-  check("구독자 + 서버 키 → Persona Context", ctx?.style?.formality === "casual" && ctx.personality.traits.includes("warm"));
-  check("활성 사실만 (비활성 제외)", ctx?.facts.length === 1 && ctx.facts[0].content === "좋아하는 음식은 초밥");
-  check("사실에는 분류 · 내용만 (출처 · 시각 없음)", ctx && Object.keys(ctx.facts[0]).sort().join() === "category,content");
+  const own = (ctx?.facts ?? []).filter((f) => !f.content.startsWith("[기본] "));
+  check("구독자 + 서버 키 → Persona Context", !!ctx?.style && ctx.personality.traits.includes("warm"));
+  check("활성 사실만 (비활성 제외)", own.length === 1 && own[0].content === "좋아하는 음식은 초밥");
+  check("사실에는 분류 · 내용 · 공개 여부만 (출처 · 시각 없음)", own[0] && Object.keys(own[0]).sort().join() === "category,content,undisclosed");
   check("Boundary 기본값 + 크리에이터 설정 (jokes 금지, current_location 금지, everyday 허용)",
     ctx?.boundaries.jokes === false && ctx.boundaries.current_location === false && ctx.boundaries.everyday === true && Object.keys(ctx.boundaries).length === 10);
 }
@@ -428,9 +438,10 @@ console.log("\nv0.5 · 회귀 A — 활성 Fact 50개 제한 우회");
 {
   const add = (content, active = true) =>
     as(U.creatorA, `insert into public.creator_facts (creator_id, content, active) values ('c1', $1, $2) returning id`, [content, active]);
-  // 지금 활성 1개(초밥) → 49개 더 → 50개
-  for (let i = 0; i < 49; i++) await add(`활성 사실 ${i}`);
+  // 지금 활성 (초밥 + v0.8.5 기본정보 6개) → 50개까지 채운다
   const activeCount = async () => Number((await db.query(`select count(*)::int as n from public.creator_facts where creator_id = 'c1' and active`)).rows[0].n);
+  const base = await activeCount();
+  for (let i = 0; i < 50 - base; i++) await add(`활성 사실 ${i}`);
   check("활성 50개까지는 허용", (await activeCount()) === 50);
   check("51번째 활성 insert → 거부", await failsWith(U.creatorA, `insert into public.creator_facts (creator_id, content) values ('c1', '51번째')`, [], /too many active facts/));
   const parked = [];
@@ -670,7 +681,7 @@ console.log("\nv0.6 · ai_fan_memory_context");
   await db.exec(`delete from public.fan_memories where content like '취미 메모 %'`);
 
   // E. 다른 크리에이터 AI
-  await db.exec(`insert into public.creator_personas (creator_id) values ('c2')`);
+  await db.exec(avatarReadySql("c2", [U.subscriber]));
   await db.query(`insert into public.subscriptions (fan_id, creator_id, tier) values ($1, 'c2', 'subscriber') on conflict (fan_id, creator_id) do update set tier = 'subscriber'`, [U.subscriber]);
   const c2 = (await as(U.subscriber, ctxMem, [KEY, "c2", ["오사카", "초밥"], 8])).rows[0].r;
   check("E. 다른 크리에이터(c2) AI Context에는 c1 Memory 없음", c2.enabled === true && c2.items.length === 0, JSON.stringify(c2));

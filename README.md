@@ -204,6 +204,7 @@ npm run test:human-live -- --confirm-dev                      # v0.7 실제 프�
 npm run build && npm run test:human-e2e -- --confirm-dev      # v0.7 Chrome 두 브라우저: Fan Manager → 직접 메시지 실시간 → 공유 · 신고 · 차단 · 구독 종료 (LLM 없음)
 npm run test:safety-live -- --confirm-dev                     # v0.8 실제 프로젝트: Safe Delay 누출(행 · 미디어 · AI · 반응 · Fan Manager) · 운영 권한 · 계정 삭제 (LLM 없음)
 npm run build && npm run test:safety-e2e -- --confirm-dev     # v0.8 Chrome: SafeShare OCR · 가리기 · 공개 예약 · 지금 공개 · 차단 관리 · /admin 404 · 계정 삭제 (LLM 없음)
+npm run build && npm run test:avatar-e2e -- --confirm-dev    # v0.8.5 Chrome: AI Avatar ON 가드 · 기본정보 · 말투 학습 · 환영 메시지 · 열람 안내 · Fans 플랜 · AI 요약 · 통계 · 320px (LLM 없음)
 npm run build && npm run test:discover-e2e -- --confirm-dev  # v0.8.1 Chrome: 0명 빈 상태 → 크리에이터 등록 → Discover · Today · Safe Delay · 차단/해제 · 계정 삭제 (LLM 없음)
 npm run find:test-leftovers                                   # 읽기 전용: 남은 테스트 형식 계정 · seed 계정 · 주인 없는 Storage 파일 목록 (삭제하지 않음)
 npm run db:cleanup-media -- --dry-run --confirm-dev # 참조 없는 업로드 파일 찾기 (--dry-run 빼면 삭제)
@@ -295,6 +296,19 @@ AI가 크리에이터를 대신하는 것이 아니라, 필요할 때 실제 크
 | 차단한 크리에이터 (v0.8.1) | 내가 차단한 크리에이터는 Discover(목록 · 방금 기록된 순간) · Today · 보관함 · 새 대화 시작 목록에서 숨긴다 (`getMyBlockedUserIds()` — RLS상 내 차단만 보인다). 기존 대화 기록 · 차단 해제 · Persona AI 차단 규칙은 그대로 |
 
 AI 키는 `AI_PROVIDER=anthropic` · `AI_API_KEY` · `AI_MODEL` (서버 환경 변수). `src/lib/ai/*`는 `server-only` — Client Component에서 import하면 빌드가 실패한다.
+
+### Creator AI Avatar · Studio (v0.8.5)
+
+| 항목 | 내용 |
+|---|---|
+| AI 문답 ON 가드 | `creators.persona_enabled` — 기본정보(직업 + 6개) · 말투 문답(40개 중 최소 32 · 안전 관련 필수 9) · 성향(Persona 행) · 대화 경계 확인이 모두 끝나야 켜진다 (DB trigger · API로 직접 켜도 `avatar_not_ready`). 준비가 깨지면(초기화 · 기본정보 삭제 등) 자동 OFF. 새 채널은 OFF |
+| Fact / Style 분리 | 기본정보 → `creator_facts`(basic_key) = VERIFIED FACTS. 말투 학습 답변 → `creator_style_samples` = STYLE 예시일 뿐 사실 근거가 아니다 (Prompt에 명시). 예전 말투 칸(formality 등)은 앱에서 쓸 수 없다 — 학습 답변에서 센 특징이 우선 |
+| 말투 데이터 | 고칠 수 없다 (쓰기는 함수만). 다시 답하기 = 이전 답 보관 후 새 행 · 추가 학습(`avatar_training`) · AI 답 고침(`creator_correction`, 구조만) · 전체 초기화(확인 문구 "초기화", 보관 · AI OFF) |
+| AI 대화 열람 | 팬이 크리에이터별 안내를 확인해야 AI 대화가 열린다(`ai_notice_required`). 크리에이터는 `creator_fan_ai_messages()`로 확인 **이후** 메시지만 본다. 확인 취소(My › AI Avatar 대화 열람) 시 열람 중지. `ai_messages` · `fan_memories` RLS는 그대로 |
+| 구독 환영 메시지 | 유료 구독 활성화 순간 subscriptions trigger가 한 번(팬 × 크리에이터) `subscription_welcomes`에 만든다. 팬 화면에 "Creator가 설정한 자동 환영 메시지"로 표시 (Human Chat에 넣지 않음) |
+| Fans | 플랜 탭(등급 목록 · 개수는 enum에서 — `fan_manager_tier_counts` · `fan_manager_by_tier`) · 팬 상세 정보 / 대화(✓ 직접 · 🤖 AI) / AI 요약 |
+| AI 요약 | `/api/studio/fan-summary` — 허용된 데이터만 규칙으로 정리. LLM 한 줄 요약은 `AI_FAN_SUMMARY=on`일 때만(기본 꺼짐), 추론 · 평가 문장 필터 통과 |
+| 통계 | `creator_analytics(from, to)` — Moment · 받은 반응 · 새 관계 · AI 대화량(합계만). 조회수는 저장하지 않음(“데이터 준비 중”) |
 
 ## 디자인 시스템
 

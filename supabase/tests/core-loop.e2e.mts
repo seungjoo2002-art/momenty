@@ -15,6 +15,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { cleanupTestUsers, registerCleanup } from "./support/cleanup.mjs";
+import { acknowledgeAiNotice, makeAvatarReady } from "./support/avatarLive.mjs";
 import { chromium, type Page } from "playwright-core";
 
 process.loadEnvFile(".env.local");
@@ -126,10 +127,11 @@ try {
   const { data: cr, error: cErr } = await C.sb.from("creators").insert({ profile_id: C.uid, name: CREATOR_NAME, handle: `loop.${stamp}`, category: "sports" }).select("id").single();
   if (cErr) throw cErr;
   const cid = cr.id as string;
-  const { error: pErr } = await C.sb.from("creator_personas").insert({ creator_id: cid, formality: "casual", reply_length: "short", laugh_kk: true, laugh_hh: false, emoji_level: 1, traits: ["bright"] });
-  if (pErr) throw pErr;
+  // v0.8.5: 말투는 학습 답변으로 (반말 · 짧게 · ㅋㅋ O · ㅎㅎ X)
+  await makeAvatarReady(C.sb, cid, { traits: ["bright"], defaultReply: (_m: string, i: number) => ["응 알겠어 ㅋㅋ", "오 진짜? 대박 ㅋㅋ", "헐 고마워!!", "그건 좀 비밀 ㅋㅋ 다른 얘기 하자", "나도 그래 ㅋㅋ 너는 어때?"][i % 5] });
   const { error: sErr } = await admin.from("subscriptions").insert({ fan_id: F.uid, creator_id: cid, tier: "subscriber" });
   if (sErr) throw sErr;
+  await acknowledgeAiNotice(F.sb, cid);
   console.log(`준비: 크리에이터 ${CREATOR_NAME}(Persona 설정) · 구독 팬 F · 모델 ${process.env.AI_MODEL}`);
 
   /* ---------- Creator: Moment 작성 ---------- */

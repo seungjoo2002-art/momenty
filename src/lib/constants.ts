@@ -1,4 +1,4 @@
-import type { CategoryKey } from "@/lib/types";
+import type { CategoryKey, Tier } from "@/lib/types";
 
 export const CATEGORY_LABEL: Record<CategoryKey, string> = {
   photo: "사진",
@@ -19,3 +19,17 @@ export const FEATURES = {
   creatorAI: true,
   payments: false,
 } as const;
+
+/**
+ * 구독 플랜 이름 (subscriptions.tier). DB enum과 같은 값 — 새 등급이 생기면 여기에 이름만 더한다.
+ * 이름이 없는 등급은 값 그대로 보여준다 (planLabel).
+ */
+export const PLAN_LABEL: Record<Tier, string> = {
+  follow: "무료",
+  subscriber: "구독",
+  premium: "Premium",
+};
+
+export function planLabel(tier: string): string {
+  return (PLAN_LABEL as Record<string, string>)[tier] ?? tier;
+}

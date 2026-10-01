@@ -197,7 +197,7 @@ try {
     return btoa(s);
   });
   const png = Buffer.from(avatarPng, "base64");
-  await step("Creator B 가입(UI · 크리에이터로 시작) → 채널 설정(사진 · 사용자 이름 · 소개 · 카테고리) → Studio", async () => {
+  await step("Creator B 가입(UI · 크리에이터로 시작) → 채널 설정(사진 · 아이디 · 직업 · 소개 · 카테고리) → Studio", async () => {
     await pb.goto(`${BASE}/signup`);
     await pb.getByRole("radio", { name: /크리에이터로 시작/ }).click();
     await pb.getByLabel("활동명").fill(B.name);
@@ -209,7 +209,8 @@ try {
     if (bUid) userIds.push(bUid);
     await pb.locator('input[type="file"]').setInputFiles({ name: "me.png", mimeType: "image/png", buffer: png });
     await pb.getByRole("img", { name: B.name }).first().waitFor();
-    await pb.getByLabel("사용자 이름").fill(B.handle);
+    await pb.getByLabel("아이디").fill(B.handle);
+    await pb.getByRole("button", { name: "유튜버", exact: true }).click();
     await pb.getByLabel("소개").fill("Discover E2E로 만든 채널이에요.");
     await pb.getByRole("button", { name: "아트" }).click();
     await pb.getByRole("button", { name: "Studio 시작하기" }).click();

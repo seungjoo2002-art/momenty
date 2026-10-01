@@ -102,6 +102,37 @@ export function CreatorMessage({
   );
 }
 
+/**
+ * 구독 환영 메시지 — 크리에이터가 미리 설정해 둔 자동 메시지. 본인이 실시간으로 보낸 것처럼 보이지 않게
+ * "본인" 라벨 · ✓ 표시 없이, "Creator가 설정한 자동 환영 메시지"를 항상 붙인다.
+ */
+export function WelcomeMessage({
+  creator,
+  text,
+  createdAt,
+  aiAvailable = false,
+}: {
+  creator: Pick<Creator, "name" | "avatarUrl">;
+  text: string;
+  createdAt: string;
+  aiAvailable?: boolean;
+}) {
+  return (
+    <div className="flex gap-2 pr-12">
+      <Avatar src={creator.avatarUrl} name={creator.name} size="sm" />
+      <div className="min-w-0">
+        <p className="mb-1 text-meta text-ink-2">{creator.name}</p>
+        <div className="rounded-[18px] rounded-tl-[6px] border border-dashed border-line-strong bg-surface px-3.5 py-2.5 text-sub whitespace-pre-line text-ink">{text}</div>
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-micro text-faint">
+          <time>{formatClock(createdAt)}</time>
+          <span>· Creator가 설정한 자동 환영 메시지</span>
+        </div>
+        {aiAvailable && <p className="mt-1.5 text-meta text-ai">🤖 아래에서 {creator.name} 공식 AI Avatar와 이야기를 시작할 수 있어요.</p>}
+      </div>
+    </div>
+  );
+}
+
 export function FanMessage({ text, createdAt, to }: { text: string; createdAt: string; /** 누구에게 보낸 메시지인지 (예: "🤖 AI에게", "✓ 지훈에게 직접") */ to?: string }) {
   return (
     <div className="flex flex-col items-end pl-14">

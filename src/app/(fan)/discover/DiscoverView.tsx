@@ -61,7 +61,7 @@ export function DiscoverView({ creators: allCreators, counts, latest: allLatest 
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="이름, 사용자 이름, 관심사로 찾기"
+            placeholder="이름, 아이디, 관심사로 찾기"
             className="min-w-0 flex-1 bg-transparent text-sub outline-none placeholder:text-faint"
           />
         </label>

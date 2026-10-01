@@ -10,6 +10,7 @@
 import { randomBytes } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { cleanupTestUsers, registerCleanup } from "./support/cleanup.mjs";
+import { acknowledgeAiNotice, makeAvatarReady } from "./support/avatarLive.mjs";
 
 process.loadEnvFile(".env.local");
 if (!process.argv.includes("--confirm-dev")) {
@@ -70,11 +71,11 @@ try {
   };
   const ca = await mk(A, "a");
   const cb = await mk(B, "b");
-  const { error: pErr } = await A.sb.from("creator_personas").insert({ creator_id: ca });
-  if (pErr) throw pErr;
+  await makeAvatarReady(A.sb, ca);
   for (const [fan, tier] of [[F1, "subscriber"], [F2, "premium"]] as const) {
     const { error } = await admin.from("subscriptions").insert({ fan_id: fan.uid, creator_id: ca, tier });
     if (error) throw error;
+    await acknowledgeAiNotice(fan.sb, ca);
   }
   {
     const { error } = await FW.sb.from("subscriptions").insert({ fan_id: FW.uid, creator_id: ca, tier: "follow" });

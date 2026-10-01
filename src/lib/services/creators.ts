@@ -4,6 +4,7 @@
  * verified · follower_count · 가격 같은 값은 앱에서 바꿀 수 없다 (DB가 거부한다).
  */
 import { currentUserId, supabase } from "@/lib/supabase/client";
+import { JOB_MAX } from "@/lib/avatar";
 import type { CategoryKey, Creator } from "@/lib/types";
 import { ServiceError, toServiceError } from "./errors";
 import { AVATAR_BUCKET, avatarPathOf, removeFiles, uploadAvatar } from "./media";
@@ -104,6 +105,8 @@ export const HANDLE_RULE = /^[a-z0-9._]{2,30}$/;
 export interface CreatorProfileInput {
   name: string;
   handle: string;
+  /** 직업 / 활동 분야 (공개 프로필) */
+  job: string;
   bio: string;
   category: CategoryKey;
   /** 새로 고른 프로필 사진 (없으면 그대로) */
@@ -114,13 +117,16 @@ export function validateCreatorProfile(input: Omit<CreatorProfileInput, "avatarF
   const name = input.name.trim();
   if (!name) return "활동명을 입력해 주세요.";
   if (name.length > 40) return "활동명은 40자까지 쓸 수 있어요.";
-  if (!HANDLE_RULE.test(input.handle)) return "사용자 이름은 영문 소문자 · 숫자 · 마침표 · 밑줄로 2~30자예요.";
+  if (!HANDLE_RULE.test(input.handle)) return "아이디는 영문 소문자 · 숫자 · 마침표 · 밑줄로 2~30자예요.";
+  if (!input.job.trim()) return "직업 / 활동 분야를 골라 주세요.";
+  if (input.job.trim().length > JOB_MAX) return `직업 / 활동 분야는 ${JOB_MAX}자까지 쓸 수 있어요.`;
+  if (!input.bio.trim()) return "소개를 한두 줄 적어 주세요.";
   if (input.bio.length > 300) return "소개는 300자까지 쓸 수 있어요.";
   if (!input.category) return "카테고리를 골라 주세요.";
   return null;
 }
 
-/** 사용자 이름을 쓸 수 있는지 (본인이 이미 쓰는 이름이면 true) */
+/** 아이디(@handle)를 쓸 수 있는지 (본인이 이미 쓰는 아이디면 true) */
 export async function isHandleAvailable(handle: string, myCreatorId?: string): Promise<boolean> {
   const { data, error } = await supabase().from("creators").select("id").eq("handle", handle).maybeSingle();
   if (error) throw toServiceError(error);
@@ -163,6 +169,7 @@ export async function createCreatorProfile(input: CreatorProfileInput): Promise<
           profile_id: uid,
           name: input.name.trim(),
           handle: input.handle,
+          job: input.job.trim(),
           bio: input.bio.trim(),
           category: input.category,
           avatar_url: avatarUrl ?? null,
@@ -180,7 +187,7 @@ export async function createCreatorProfile(input: CreatorProfileInput): Promise<
     invalidateCreators();
     return creator;
   } catch (e) {
-    if (duplicateHandle(e)) throw new ServiceError("이미 사용 중인 사용자 이름이에요.", "conflict", e);
+    if (duplicateHandle(e)) throw new ServiceError("이미 사용 중인 아이디예요.", "conflict", e);
     throw toServiceError(e, "크리에이터 프로필을 만들지 못했어요.");
   }
 }
@@ -199,6 +206,7 @@ export async function updateCreatorProfile(creatorId: string, input: CreatorProf
         .update({
           name: input.name.trim(),
           handle: input.handle,
+          job: input.job.trim(),
           bio: input.bio.trim(),
           category: input.category,
           ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
@@ -217,7 +225,7 @@ export async function updateCreatorProfile(creatorId: string, input: CreatorProf
     invalidateCreators();
     return updated;
   } catch (e) {
-    if (duplicateHandle(e)) throw new ServiceError("이미 사용 중인 사용자 이름이에요.", "conflict", e);
+    if (duplicateHandle(e)) throw new ServiceError("이미 사용 중인 아이디예요.", "conflict", e);
     throw toServiceError(e, "프로필을 저장하지 못했어요.");
   }
 }

@@ -14,6 +14,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { createServerClient } from "@supabase/ssr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { cleanupTestUsers, registerCleanup } from "./support/cleanup.mjs";
+import { acknowledgeAiNotice, makeAvatarReady } from "./support/avatarLive.mjs";
 
 process.loadEnvFile(".env.local");
 if (!process.argv.includes("--confirm-dev")) {
@@ -144,13 +145,9 @@ try {
   // Persona A (P) · Persona B (Q)
   const examplesA = ["오늘 진짜 개운하다 ㅋㅋ", "헐 대박 고마워!!"];
   const examplesB = ["오늘도 차분하게 하루를 정리해 봅니다.", "보내주신 이야기 잘 읽었어요."];
-  for (const [u, c, row] of [
-    [P, cp, { formality: "casual", reply_length: "short", laugh_kk: true, laugh_hh: false, emoji_level: 1, phrases: ["오늘도 달려보자"], mood: "밝고 장난스러운", example_messages: examplesA, traits: ["playful", "bright"] }],
-    [Q, cq, { formality: "polite", reply_length: "medium", laugh_kk: false, laugh_hh: false, emoji_level: 0, phrases: [], mood: "차분하고 진지한", example_messages: examplesB, traits: ["calm", "serious"] }],
-  ] as const) {
-    const { error } = await u.sb.from("creator_personas").insert({ creator_id: c, ...row });
-    if (error) throw error;
-  }
+  // v0.8.5: 말투는 학습 답변으로 — A(반말 · ㅋㅋ) · B(존댓말 · 차분). 예시 문장은 학습 답변 안에 들어간다
+  await makeAvatarReady(P.sb, cp, { traits: ["playful", "bright"], replies: { greeting_1: examplesA[0], thanks_1: examplesA[1] }, defaultReply: (_m: string, i: number) => ["응 알겠어 ㅋㅋ", "오 진짜? 대박 ㅋㅋ", "헐 고마워!!", "그건 좀 비밀 ㅋㅋ 다른 얘기 하자", "나도 그래 ㅋㅋ 너는 어때?"][i % 5] });
+  await makeAvatarReady(Q.sb, cq, { traits: ["calm", "serious"], replies: { today_2: examplesB[0], thanks_1: examplesB[1] }, defaultReply: (_m: string, i: number) => ["네, 알겠습니다.", "그렇군요. 좋은 하루 보내세요.", "보내주신 이야기 잘 읽었어요.", "그 이야기는 말씀드리기 어려워요.", "오늘도 차분하게 하루를 정리해 봅니다."][i % 5] });
   for (const content of ["좋아하는 음식은 초밥", "취미는 필름 카메라로 사진 찍기", "매주 토요일 아침에 러닝 모임에 나가요"]) {
     const { error } = await P.sb.from("creator_facts").insert({ creator_id: cp, category: content.includes("음식") ? "food" : "hobby", content });
     if (error) throw error;
@@ -167,6 +164,7 @@ try {
   for (const c of [cp, cq]) {
     const { error } = await admin.from("subscriptions").insert({ fan_id: S.uid, creator_id: c, tier: "subscriber" });
     if (error) throw error;
+    await acknowledgeAiNotice(S.sb, c);
   }
   console.log(`준비: 크리에이터 P(하늘 · Persona A) · Q(서윤 · Persona B) · R(도현), 팬 S(P · Q 구독자) · 모델 ${process.env.AI_MODEL}`);
 

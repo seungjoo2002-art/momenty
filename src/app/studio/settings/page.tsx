@@ -47,7 +47,7 @@ export default function StudioSettingsPage() {
       <section className="mt-7">
         <SectionHeader title="계정" />
         <ListGroup>
-          <ListRow href="/studio/settings/profile" icon={<UserRound className={icon} />} label="프로필 편집" description="이름 · 사용자 이름 · 사진 · 소개 · 카테고리" />
+          <ListRow href="/studio/settings/profile" icon={<UserRound className={icon} />} label="프로필 편집" description="활동명 · 아이디 · 직업 · 사진 · 소개 · 카테고리" />
           <ListRow href="/studio/records" icon={<FolderClock className={icon} />} label="내 기록 (Records)" description="지금까지 남긴 하루들" />
           <ListRow icon={<CreditCard className={icon} />} label="구독 가격 · 정산" description="결제 연동 후 열려요" />
           <ListRow icon={<Bell className={icon} />} label="알림" />
@@ -56,10 +56,11 @@ export default function StudioSettingsPage() {
       </section>
 
       <section className="mt-7">
-        <SectionHeader title="Creator AI & 안전" caption="AI가 나를 대신해 말하는 방식과 한계" />
+        <SectionHeader title="AI Avatar & 안전" caption="나를 닮은 공식 AI Avatar와 그 한계" />
         <ListGroup>
-          <ListRow href="/studio/settings/persona" icon={<MessagesSquare className={icon} />} label="Creator AI · Persona" description="켜기 · 말투 · 성향 · 확인된 사실" />
-          <ListRow href="/studio/settings/persona#boundaries" icon={<Ban className={icon} />} label="대화 경계" description="AI가 답하지 않을 주제" />
+          <ListRow href="/studio/settings/avatar" icon={<MessagesSquare className={icon} />} label="AI Avatar" description="AI 문답 ON/OFF · 기본정보 · 말투 학습 · 성향" />
+          <ListRow href="/studio/settings/persona#boundaries" icon={<Ban className={icon} />} label="대화 경계 · 확인된 사실" description="AI가 답하지 않을 주제 · 사실로 말해도 되는 것" />
+          <ListRow href="/studio/settings/welcome" icon={<Bell className={icon} />} label="구독 환영 메시지" description="새 구독자에게 한 번 보내는 자동 메시지" />
           <ListRow href="/studio/settings/safeshare" icon={<ShieldCheck className={icon} />} label="SafeShare · Safe Delay" description="위치 정보 제거 · 사진 속 개인정보 확인 · 공개 지연" />
         </ListGroup>
       </section>

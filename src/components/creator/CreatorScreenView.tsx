@@ -11,14 +11,14 @@ import { ButtonLink } from "@/components/ui/Button";
 import { LoadError, LoadingBlock } from "@/components/ui/LoadState";
 import { Photo } from "@/components/ui/Photo";
 import { TopBar } from "@/components/ui/TopBar";
-import { CATEGORY_LABEL, FEATURES } from "@/lib/constants";
+import { CATEGORY_LABEL, FEATURES, planLabel } from "@/lib/constants";
 import { useMomentData } from "@/lib/hooks/useMomentData";
 import { getCreator } from "@/lib/services/creators";
 import { getCurrentFan } from "@/lib/services/fan";
 import { getDailyRecords, getTodayMoments } from "@/lib/services/moments";
 import type { Creator, DailyRecord, Moment, Tier } from "@/lib/types";
 import { canChat, isMomentLocked, tierFor } from "@/lib/utils/access";
-import { formatCount, formatDate, josa, kstDate, shortName } from "@/lib/utils/format";
+import { formatCount, formatDate, formatPrice, josa, kstDate, shortName } from "@/lib/utils/format";
 import { CreatorTabs, type CreatorTab } from "./CreatorTabs";
 import { FollowButton } from "./FollowButton";
 
@@ -67,7 +67,7 @@ export function CreatorScreenView({ creator: initialCreator, initialTab }: { cre
             ) : tier && tier !== "follow" ? (
               <SubscriptionBadge tier={tier} className="mb-1" />
             ) : (
-              <FollowButton creatorId={creator.id} tier={tier} variant="light" size="sm" className="mb-0.5 w-[84px]" />
+              <FollowButton creatorId={creator.id} tier={tier} variant="light" size="sm" className="mb-0.5" />
             )}
           </div>
         </Photo>
@@ -133,7 +133,7 @@ function TodayPanel({ creator, tier, moments, isOwner }: { creator: Creator; tie
           href={`/chat/${creator.id}`}
           className="mt-8 flex items-center justify-between border-t border-line py-4 text-caption text-muted hover:text-ink"
         >
-          <span>🤖 {creator.name} AI와 이야기하기</span>
+          <span>🤖 {creator.name} 공식 AI Avatar와 이야기하기</span>
           <ChevronRight className="size-4" />
         </Link>
       )}
@@ -154,16 +154,64 @@ function ArchivePanel({ dailies }: { dailies: DailyRecord[] }) {
   );
 }
 
+/**
+ * 소개 — 크리에이터가 가입할 때 적은 정보(활동명 · 아이디 · 직업/활동 분야 · 소개)와 구독 플랜 · AI Avatar 여부.
+ * 비어 있는 칸은 채워 넣은 문장 대신 조용한 빈 상태로 둔다.
+ */
 function IntroPanel({ creator, tier, isOwner }: { creator: Creator; tier?: Tier; isOwner: boolean }) {
+  const plans: { tier: Tier; price: number }[] = [
+    { tier: "follow", price: 0 },
+    { tier: "subscriber", price: creator.pricing.subscriber },
+    { tier: "premium", price: creator.pricing.premium },
+  ];
   return (
     <section className="px-5 pt-5">
-      {creator.bio ? <p className="text-body text-ink-2">{creator.bio}</p> : <p className="text-body text-muted">아직 소개가 없어요.</p>}
-      <p className="mt-3 text-caption text-muted">
-        <span className="font-medium text-brand">{CATEGORY_LABEL[creator.category]}</span>
-        {creator.tags.map((t) => ` · #${t}`)}
-      </p>
+      <div className="min-w-0">
+        <p className="text-name font-semibold break-words">{creator.name}</p>
+        <p className="mt-0.5 text-caption break-all text-muted">@{creator.handle}</p>
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {creator.job && <span className="max-w-full rounded-full bg-brand-tint px-2.5 py-1 text-meta font-medium break-words text-brand-deep">{creator.job}</span>}
+          <span className="rounded-full border border-line-strong px-2.5 py-1 text-meta text-ink-2">{CATEGORY_LABEL[creator.category]}</span>
+          {creator.tags.map((t) => (
+            <span key={t} className="text-meta text-muted">
+              #{t}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <h2 className="mt-6 text-meta font-semibold text-muted">소개</h2>
+      {creator.bio ? (
+        <p className="mt-1.5 text-body leading-relaxed break-words whitespace-pre-line text-ink-2">{creator.bio}</p>
+      ) : (
+        <p className="mt-1.5 rounded-tile bg-canvas px-4 py-3 text-caption text-muted">{isOwner ? "소개를 적으면 팬이 나를 더 잘 알 수 있어요." : "아직 소개를 적지 않았어요."}</p>
+      )}
+
+      {creator.personaEnabled && (
+        <div className="mt-5 rounded-card border border-ai-line bg-ai-soft/50 px-4 py-3.5">
+          <p className="text-sub font-semibold text-ai">🤖 공식 AI Avatar와 대화할 수 있어요</p>
+          <p className="mt-1 break-keep text-caption leading-relaxed text-ink-2">
+            {josa(creator.name, "이", "가")} 직접 알려 준 정보와 말투, 공개한 Moment를 바탕으로 답하는 AI예요. {creator.name} 본인이 아니에요.
+          </p>
+          <p className="mt-1 text-meta text-muted">구독자에게 열려 있어요.</p>
+        </div>
+      )}
+
+      <h2 className="mt-6 text-meta font-semibold text-muted">구독 플랜</h2>
+      <ul className="mt-1.5 divide-y divide-line overflow-hidden rounded-card border border-line bg-surface">
+        {plans.map((p) => (
+          <li key={p.tier} className="flex items-center justify-between gap-3 px-4 py-3">
+            <span className="text-sub font-medium">{planLabel(p.tier)}</span>
+            <span className="shrink-0 text-caption text-muted">
+              {p.tier === "follow" ? "무료" : !FEATURES.payments ? "결제 준비 중" : p.price ? formatPrice(p.price) : "가격 준비 중"}
+              {tier === p.tier && <span className="ml-1.5 font-semibold text-brand">· 이용 중</span>}
+            </span>
+          </li>
+        ))}
+      </ul>
+
       {/* 모든 크리에이터에게 같은 문구 — 누가 Safe Delay를 쓰는지 · 얼마나 늦추는지는 드러내지 않는다 */}
-      <p className="mt-2 break-keep text-meta text-faint">크리에이터 보호를 위해 실제 기록 시점과 공개 시점이 다를 수 있어요. Moment의 장소는 기록 당시의 장소예요.</p>
+      <p className="mt-4 break-keep text-meta text-faint">크리에이터 보호를 위해 실제 기록 시점과 공개 시점이 다를 수 있어요. Moment의 장소는 기록 당시의 장소예요.</p>
 
       <dl className="mt-5 grid grid-cols-2 gap-2.5">
         <div className="rounded-tile bg-surface px-4 py-3 ring-1 ring-line ring-inset">

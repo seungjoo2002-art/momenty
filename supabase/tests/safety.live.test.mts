@@ -10,6 +10,7 @@
 import { randomBytes } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { cleanupTestUsers, registerCleanup } from "./support/cleanup.mjs";
+import { acknowledgeAiNotice, makeAvatarReady } from "./support/avatarLive.mjs";
 
 process.loadEnvFile(".env.local");
 if (!process.argv.includes("--confirm-dev")) {
@@ -66,10 +67,11 @@ try {
   const { data: cr, error: cErr } = await C.sb.from("creators").insert({ profile_id: C.uid, name: `SL ${stamp}`, handle: `sl.${stamp}`, category: "art" }).select("id").single();
   if (cErr) throw cErr;
   const cid = cr.id as string;
-  await C.sb.from("creator_personas").insert({ creator_id: cid });
+  await makeAvatarReady(C.sb, cid);
   {
     const { error } = await admin.from("subscriptions").insert({ fan_id: S.uid, creator_id: cid, tier: "subscriber" });
     if (error) throw error;
+    await acknowledgeAiNotice(S.sb, cid);
   }
   console.log("준비: 크리에이터 C · 구독 팬 S · 다른 사용자 O");
 

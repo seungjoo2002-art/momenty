@@ -9,6 +9,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
+import { avatarReadySql } from "./support/avatarFixture.mjs";
 
 const MIGRATIONS = join(import.meta.dirname, "..", "migrations");
 const SUPABASE_STUB = `
@@ -97,7 +98,6 @@ await db.exec(`
   insert into public.creators (id, profile_id, name, handle, category) values
     ('c1', '${U.creatorA}', '지훈', 'jihoon', 'sports'),
     ('c2', '${U.creatorB}', '도현', 'dohyun', 'music');
-  insert into public.creator_personas (creator_id) values ('c1'), ('c2');
   insert into public.subscriptions (fan_id, creator_id, tier, started_at) values
     ('${U.fan1}', 'c1', 'subscriber', now() - interval '31 days'),
     ('${U.fan2}', 'c1', 'subscriber', now() - interval '2 days'),
@@ -106,6 +106,9 @@ await db.exec(`
     ('${U.fan5}', 'c1', 'subscriber', now() - interval '40 days'),
     ('${U.fan1}', 'c2', 'subscriber', now() - interval '5 days');
 `);
+// v0.8.5: AI Avatar 준비 완료 + ON · 팬의 AI 대화 열람 고지 확인 (v0.7 검사의 전제)
+await db.exec(avatarReadySql("c1", [U.fan1, U.fan2, U.follower, U.fan4, U.fan5]));
+await db.exec(avatarReadySql("c2", [U.fan1]));
 // c1 Moment 6개 (최근 5개 중 fan1이 4개에 반응)
 const moments = [];
 for (let i = 0; i < 6; i++) {
