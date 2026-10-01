@@ -11,15 +11,21 @@ const TABS: { key: CreatorTab; label: string }[] = [
   { key: "intro", label: "소개" },
 ];
 
-/** 오늘 | 아카이브 | 소개 — 패널은 서버에서 렌더링되어 들어온다 */
+/** 오늘 | 아카이브 | 소개 — 패널은 서버에서 렌더링되어 들어온다. tab · onTabChange를 주면 바깥(예: 소개 더보기)에서도 탭을 바꿀 수 있다 */
 export function CreatorTabs({
   initial,
   panels,
+  tab: controlled,
+  onTabChange,
 }: {
   initial: CreatorTab;
   panels: Record<CreatorTab, React.ReactNode>;
+  tab?: CreatorTab;
+  onTabChange?: (tab: CreatorTab) => void;
 }) {
-  const [tab, setTab] = useState<CreatorTab>(initial);
+  const [inner, setInner] = useState<CreatorTab>(initial);
+  const tab = controlled ?? inner;
+  const setTab = (t: CreatorTab) => (onTabChange ? onTabChange(t) : setInner(t));
 
   return (
     <>

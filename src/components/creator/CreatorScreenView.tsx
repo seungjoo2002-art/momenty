@@ -2,6 +2,7 @@
 
 import { ChevronRight, Moon } from "lucide-react";
 import Link from "next/link";
+import { useRef, useState } from "react";
 import { useAccount } from "@/components/auth/AuthProvider";
 import { SubscriptionBadge, VerifiedMark } from "@/components/badges";
 import { DailyCard } from "@/components/moment/DailyCard";
@@ -42,6 +43,9 @@ export function CreatorScreenView({ creator: initialCreator, initialTab }: { cre
   const tier = data?.tier;
   const isOwner = !!account?.creator && account.creator.id === creator.id;
   const pending = error ? <LoadError message={error} onRetry={retry} /> : <LoadingBlock />;
+  const [tab, setTab] = useState<CreatorTab>(initialTab);
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const detail = [creator.job, CATEGORY_LABEL[creator.category]].filter(Boolean).join(" · ");
 
   return (
     <main className="animate-fade-in">
@@ -74,8 +78,28 @@ export function CreatorScreenView({ creator: initialCreator, initialTab }: { cre
         <TopBar tone="overlay" backHref={initialTab === "today" ? "/today" : "/discover"} />
       </div>
 
+      {/* 직업 · 분야 · 소개 미리보기 — 전체는 소개 탭에서 */}
+      <section className="px-5 pt-3.5">
+        {detail && <p className="text-caption break-words text-ink-2">{detail}</p>}
+        {creator.bio && <p className="mt-1 line-clamp-2 text-caption leading-relaxed break-words whitespace-pre-line text-muted">{creator.bio}</p>}
+        <button
+          type="button"
+          onClick={() => {
+            setTab("intro");
+            tabsRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+          }}
+          className="mt-1 inline-flex h-8 items-center gap-0.5 text-meta text-muted hover:text-ink"
+        >
+          소개 더보기
+          <ChevronRight className="size-3.5" />
+        </button>
+      </section>
+
+      <div ref={tabsRef} />
       <CreatorTabs
         initial={initialTab}
+        tab={tab}
+        onTabChange={setTab}
         panels={{
           today: data ? <TodayPanel creator={creator} tier={tier} moments={moments} isOwner={isOwner} /> : pending,
           archive: data ? <ArchivePanel dailies={data.dailies} /> : pending,
