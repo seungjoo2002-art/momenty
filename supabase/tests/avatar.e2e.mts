@@ -283,10 +283,10 @@ try {
     return [!text.includes("본인") && text.includes("구독해 줘서 고마워"), text];
   });
   await step("AI 대화 전 안내 → 확인 전 입력창 숨김 · 확인하면 열림 (DB 기록)", async () => {
-    await fan.getByText("크리에이터가 확인할 수 있어요").first().waitFor();
+    await fan.getByText("안내를 확인한 이후의 AI 대화를 볼 수 있어요", { exact: false }).first().waitFor();
     const hiddenBefore = !(await fan.getByLabel("메시지").isVisible());
     await shot(fan, "04-notice");
-    await fan.getByRole("button", { name: "확인하고 AI Avatar와 대화하기" }).click();
+    await fan.getByRole("button", { name: "확인하고 시작하기" }).click();
     await fan.getByLabel("메시지").waitFor({ state: "visible" });
     const { data } = await F.sb.from("ai_creator_view_consents").select("agreed_at").eq("creator_id", cid);
     return [hiddenBefore && data?.length === 1, data];

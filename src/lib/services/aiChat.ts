@@ -206,12 +206,30 @@ export async function withdrawAiNotice(creatorId: string): Promise<void> {
   if (error) throw toServiceError(error, "취소하지 못했어요.");
 }
 
+/**
+ * AI Avatar 첫 자동 메시지 (follow starter) — 팬이 안내를 확인한 뒤 대화방 맨 위(확인 시각)에 한 번 보인다.
+ * 정해진 문장이다 (LLM이 만든 답이 아니다). 저장하지 않고 확인 시각에 그린다 → 새로고침 · 재진입 · 다시 팔로우해도 하나뿐이고,
+ * Persona Context(최근 대화)에도, 크리에이터의 AI 대화 열람에도 들어가지 않는다.
+ */
+export function aiStarterText(creatorName: string): string {
+  return `안녕! 팔로우해 줘서 고마워 😊\n나는 ${creatorName}의 AI Avatar야. 오늘 있었던 일이나 궁금한 거, 여기서 편하게 말 걸어 줘.`;
+}
+
 /* ---------- 구독 환영 메시지 (크리에이터가 미리 설정한 자동 메시지) ---------- */
 
 export interface SubscriptionWelcome {
   id: string;
   message: string;
   createdAt: string;
+}
+
+/** 내가 받은 구독 환영 메시지 전부 (Chat 목록 — 환영 메시지만 있는 크리에이터도 목록에 보이게) */
+export async function getMySubscriptionWelcomes(): Promise<(SubscriptionWelcome & { creatorId: string })[]> {
+  const uid = await currentUserId();
+  if (!uid) return [];
+  const { data, error } = await supabase().from("subscription_welcomes").select("id, creator_id, message, created_at").eq("fan_id", uid);
+  if (error) throw toServiceError(error, "환영 메시지를 불러오지 못했어요.");
+  return ((data ?? []) as { id: string; creator_id: string; message: string; created_at: string }[]).map((r) => ({ id: r.id, creatorId: r.creator_id, message: r.message, createdAt: r.created_at }));
 }
 
 export async function getSubscriptionWelcome(creatorId: string): Promise<SubscriptionWelcome | null> {

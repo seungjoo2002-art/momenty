@@ -62,6 +62,28 @@ export function AIMessage({
   );
 }
 
+/**
+ * AI Avatar 첫 자동 메시지 — 정해진 문장 (LLM 답 아님 · 크리에이터 본인 메시지 아님). "AI" 라벨 + "자동 메시지"를 항상 붙인다
+ */
+export function AIStarterMessage({ creator, text, createdAt }: { creator: Pick<Creator, "name" | "avatarUrl">; text: string; createdAt: string }) {
+  return (
+    <div className="flex gap-2 pr-12">
+      <Avatar src={creator.avatarUrl} name={creator.name} size="sm" ring="ai" />
+      <div className="min-w-0">
+        <div className="mb-1 flex items-center gap-1">
+          <span className="text-meta text-ink-2">🤖 {creator.name} AI</span>
+          <AIBadge />
+        </div>
+        <div className="rounded-[18px] rounded-tl-[6px] bg-surface px-3.5 py-2.5 text-sub whitespace-pre-line text-ink ring-1 ring-line ring-inset">{text}</div>
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-micro text-faint">
+          <time>{formatClock(createdAt)}</time>
+          <span>· {creator.name}의 AI Avatar · 자동 메시지</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function CreatorMessage({
   creator,
   text,
