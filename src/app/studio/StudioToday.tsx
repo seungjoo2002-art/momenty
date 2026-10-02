@@ -58,6 +58,9 @@ export function StudioTimeline({ creatorId }: { creatorId: string }) {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [publishing, setPublishing] = useState<string | null>(null);
+  // "지금 공개"가 성공한 Moment — 화면 동기화 보조일 뿐, 공개 여부는 DB visible_at이 정한다.
+  // (publish_moment_now는 visible_at을 DB 현재 시각으로 바꾸므로, 30초마다만 갱신되는 nowMs로는 바로 공개로 보이지 않는다)
+  const [publishedIds, setPublishedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [nowMs, setNowMs] = useState(() => Date.now());
   // 공개 예정 표시가 시간이 지나면 저절로 바뀌도록 (화면 표시만 — 공개 자체는 DB 시각이 정한다)
   useEffect(() => {
@@ -69,6 +72,7 @@ export function StudioTimeline({ creatorId }: { creatorId: string }) {
     setPublishing(m.id);
     try {
       await publishMomentNow(m.id);
+      setPublishedIds((prev) => new Set(prev).add(m.id));
       retry();
     } catch {
       /* 이미 공개됐으면 새로 읽으면 된다 */
@@ -124,7 +128,7 @@ export function StudioTimeline({ creatorId }: { creatorId: string }) {
                       <span className="text-micro text-muted">{MOMENT_TYPE_META[m.type].label}</span>
                       <VisibilityBadge visibility={m.visibility} />
                     </div>
-                    {isScheduled(m.visibleAt, nowMs) && (
+                    {!publishedIds.has(m.id) && isScheduled(m.visibleAt, nowMs) && (
                       <p className="mt-0.5 inline-flex items-center gap-0.5 text-micro font-medium whitespace-nowrap text-brand-deep">
                         <Clock3 className="size-3" />
                         공개 예정 · {formatClock(m.visibleAt!)}
@@ -132,7 +136,7 @@ export function StudioTimeline({ creatorId }: { creatorId: string }) {
                     )}
                   </div>
                 </Link>
-                {isScheduled(m.visibleAt, nowMs) && (
+                {!publishedIds.has(m.id) && isScheduled(m.visibleAt, nowMs) && (
                   <button
                     type="button"
                     onClick={() => publishNow(m)}

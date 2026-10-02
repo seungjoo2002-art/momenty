@@ -205,6 +205,7 @@ export function FanToCreatorMessage({
   createdAt,
   onReport,
   reported = false,
+  note,
 }: {
   name: string;
   avatarUrl?: string | null;
@@ -212,6 +213,8 @@ export function FanToCreatorMessage({
   createdAt: string;
   onReport?: () => void;
   reported?: boolean;
+  /** 시간 옆 작은 설명 (예: AI Avatar와 나눈 대화) */
+  note?: string;
 }) {
   return (
     <div className="flex gap-2 pr-12">
@@ -221,6 +224,7 @@ export function FanToCreatorMessage({
         <div className="rounded-[18px] rounded-tl-[6px] bg-surface px-3.5 py-2.5 text-sub text-ink ring-1 ring-line ring-inset">{text}</div>
         <div className="mt-1 flex items-center gap-1.5 text-micro text-faint">
           <time>{formatClock(createdAt)}</time>
+          {note && <span>· {note}</span>}
           {reported ? <span>· 신고함</span> : onReport && (
             <button type="button" onClick={onReport} className="hover:text-danger">
               · 신고
@@ -232,12 +236,29 @@ export function FanToCreatorMessage({
   );
 }
 
-/** (Studio) 크리에이터 본인이 보낸 직접 메시지 — 오른쪽 */
-export function OwnCreatorMessage({ text, createdAt }: { text: string; createdAt: string }) {
+/** (Studio) 크리에이터 본인이 보낸 직접 메시지 — 오른쪽 · "{이름} 본인 ✓" */
+export function OwnCreatorMessage({ name, text, createdAt }: { name: string; text: string; createdAt: string }) {
   return (
     <div className="flex flex-col items-end pl-14">
+      <p className="mb-1 flex items-center gap-1 text-meta font-semibold text-brand-deep">
+        {name} 본인
+        <VerifiedMark className="size-3.5" />
+      </p>
       <div className="rounded-[18px] rounded-tr-[6px] bg-brand px-3.5 py-2.5 text-sub text-white">{text}</div>
-      <time className="mt-1 text-micro text-faint">✓ 직접 보냄 · {formatClock(createdAt)}</time>
+      <time className="mt-1 text-micro text-faint">{formatClock(createdAt)} · 내가 직접 보낸 메시지</time>
+    </div>
+  );
+}
+
+/** (Studio) 내 AI Avatar가 팬에게 보낸 답 — 오른쪽이지만 본인 메시지와 다른 회색 말풍선 · "🤖 {이름} AI" + AI 라벨 */
+export function OwnAvatarMessage({ name, text, createdAt }: { name: string; text: string; createdAt: string }) {
+  return (
+    <div className="flex flex-col items-end pl-14">
+      <p className="mb-1 flex items-center gap-1 text-meta text-ink-2">
+        🤖 {name} AI <AIBadge />
+      </p>
+      <div className="rounded-[18px] rounded-tr-[6px] border border-ai-line bg-ai-soft px-3.5 py-2.5 text-sub text-ink">{text}</div>
+      <time className="mt-1 text-micro text-faint">{formatClock(createdAt)} · AI Avatar가 보낸 답 (내가 쓴 메시지 아님)</time>
     </div>
   );
 }

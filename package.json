@@ -32,6 +32,7 @@
     "test:discover-e2e": "tsx supabase/tests/discover.e2e.mts",
     "test:avatar-e2e": "tsx supabase/tests/avatar.e2e.mts",
     "test:avatar-live": "tsx supabase/tests/avatar.live.test.mts",
+    "test:fan-summary-live": "tsx --conditions=react-server supabase/tests/fanSummary.live.test.mts",
     "find:test-leftovers": "tsx scripts/find-test-leftovers.mts"
   },
   "dependencies": {

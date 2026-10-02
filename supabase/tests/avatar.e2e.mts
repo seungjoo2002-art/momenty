@@ -5,7 +5,7 @@
  *
  *   크리에이터 프로필(직업 · 소개) → 팬 프로필 소개 탭 · AI 문답 ON 가드(안내 → 기본정보) → 기본정보 · 말투 학습(UI 일부 + 함수)
  *   → 말투 직접 덮어쓰기 불가 → Avatar 확인(성향 · 경계) → ON → 환영 메시지(정확히 1회 · 자동 메시지 표시)
- *   → 팬 AI 대화 열람 안내 확인 → 크리에이터 Fans 플랜 탭 · 개수 · AI 대화(안내 이후만) · 요약(실제 기록 · 추정 없음 · AI 요약 준비 중)
+ *   → 팬 AI 대화 열람 안내 확인 → 크리에이터 Fans 플랜 탭 · 개수 · 팬 상세 정보 · 대화 2탭(한 타임라인 · AI 대화는 안내 이후만) · AI 팬 요약 UI(응답 가로채기 — LLM 없음)
  *   → 통계(실제 숫자 · 조회수 준비 중 · 빈 기간) → 320px: 팔로우/팔로잉 한 줄 · 긴 이름/소개/직업 가로 넘침 없음 → OFF
  *
  * · 준비(가입 · 구독 부여)는 API로 — admin은 결제 서버 역할(구독 부여)과 정리에만. AI 대화 기록은 record_ai_exchange(서버 키 + 팬 JWT)로 — 모델 호출 아님.
@@ -314,26 +314,84 @@ try {
     const free = await cp.locator("main").innerText();
     return [!premium.includes("무료팬") && !free.includes("구독팬"), { premium: premium.slice(-200), free: free.slice(-200) }];
   });
-  await step("팬 상세: 정보(플랜 · 시작일) · 대화 탭에 AI 대화(안내 이후) · 직접 대화 구분", async () => {
+  await step("팬 상세: 탭은 정보 · 대화 2개 (요약 탭 없음)", async () => {
     await cp.goto(`${BASE}/studio/fans/${F.uid}`);
     await cp.getByText("구독 플랜").waitFor();
+    const tabs = await cp.getByRole("tab").allInnerTexts();
+    return [tabs.map((t) => t.trim()).join("|") === "정보|대화", tabs];
+  });
+  await step("대화 탭: 선택 UI 없이 바로 한 타임라인 · AI 답은 🤖 AI 표시 (안내 이후) · 내 메시지 아님 안내", async () => {
     await cp.getByRole("tab", { name: "대화" }).click();
-    await cp.getByRole("tab", { name: /AI Avatar 대화/ }).click();
     await cp.getByText("요즘 필름 카메라 배우는 중이야").waitFor();
+    await cp.getByText("오 멋지다 ㅋㅋ 어떤 사진 찍었어?").waitFor();
+    const selectors = (await cp.getByRole("tab", { name: /AI Avatar 대화|직접 대화/ }).count()) + (await cp.getByRole("radio", { name: /AI Avatar 대화|직접 대화/ }).count()) + (await cp.getByRole("button", { name: /AI Avatar 대화|✓ 직접 대화/ }).count());
     const body = await cp.locator("main").innerText();
     await shot(cp, "05-fan-ai");
-    return [body.includes("안내를 확인한") && body.includes("AI가 보낸 답"), body.slice(-400)];
+    return [selectors === 0 && body.includes("안내를 확인한") && body.includes("AI Avatar가 보낸 답 (내가 쓴 메시지 아님)") && body.includes(`🤖 ${NAME} AI`), { selectors, body: body.slice(-500) }];
   });
   await step("다른 크리에이터(L)는 이 팬의 AI 대화를 볼 수 없음", async () => {
     const { error } = await L.sb.rpc("creator_fan_ai_messages", { p_fan_id: F.uid });
     return [!!error && /fan_not_found/.test(error.message), error?.message];
   });
-  await step("요약 탭: 실제 기록 기반 안내 · 플랜 · 대화 사실만 · 추정/평가 없음 · AI 요약은 준비 중(가짜 결과 없음)", async () => {
-    await cp.getByRole("tab", { name: "요약", exact: true }).click();
-    await cp.getByText("구독 플랜: Premium").waitFor();
+  await step("정보 탭: 구독 정보 · 있었던 일(대화 사실 · 실제 기록) · AI 팬 요약 '아직 정리된 내용이 없어요' · 추정/평가 없음", async () => {
+    await cp.getByRole("tab", { name: "정보" }).click();
+    await cp.getByText("아직 정리된 내용이 없어요.").waitFor();
     const body = await cp.locator("main").innerText();
-    await shot(cp, "06-summary");
-    return [!FORBIDDEN.test(body) && body.includes("현재 대화") && body.includes("추측이나 팬 평가는 하지 않아요") && body.includes("실제 기록을 바탕으로 정리한 내용입니다") && body.includes("AI 요약 · 준비 중") && !body.includes("AI가 요약했어요"), body.slice(-500)];
+    await shot(cp, "06-info");
+    const order = ["구독 정보", "있었던 일", "팬이 공유한 정보", "내 메모", "AI 팬 요약", "이 팬 차단하기"].map((k) => body.indexOf(k));
+    return [
+      !FORBIDDEN.test(body) && order.every((x, i) => x >= 0 && (i === 0 || x > order[i - 1])) && body.includes("AI Avatar 대화 1개 메시지") && body.includes("실제 기록 그대로예요") && !body.includes("AI 요약 · 준비 중"),
+      { order, body: body.slice(0, 700) },
+    ];
+  });
+  // 서버는 AI_FAN_SUMMARY=off — 실제 LLM은 부르지 않는다
+  await step("AI 팬 요약: 서버 설정이 꺼져 있으면 실패 안내 · 사실 정보는 그대로", async () => {
+    await cp.getByRole("button", { name: "팬 요약 만들기" }).click();
+    await cp.getByRole("alert").filter({ hasText: "지금은 AI 팬 요약을 만들 수 없어요." }).waitFor();
+    const body = await cp.locator("main").innerText();
+    return [body.includes("AI Avatar 대화 1개 메시지") && body.includes("구독 플랜") && body.includes("팬 요약 만들기"), body.slice(-400)];
+  });
+  await step("AI 팬 요약 UI: 로딩 → 성공(요약 · 마지막 정리 · 다시 정리하기) → 다시 정리 실패해도 이전 요약 유지 (응답만 가로챔 · LLM 없음)", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    let calls = 0;
+    await cp.route("**/api/studio/fan-summary", async (route) => {
+      calls++;
+      if (calls === 1) {
+        await gate;
+        return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, summary: { sentences: ["10월부터 Premium을 구독하고 있어요.", "AI Avatar와 필름 카메라 이야기를 나눴어요."], generatedAt: "2026-10-02T03:20:00Z" } }) });
+      }
+      return route.fulfill({ status: 502, contentType: "application/json", body: JSON.stringify({ ok: false, error: { code: "summary_failed", message: "요약을 만들지 못했어요. 잠시 후 다시 시도해 주세요." } }) });
+    });
+    try {
+      await cp.getByRole("button", { name: "팬 요약 만들기" }).click();
+      await cp.getByText("정리하고 있어요…").waitFor();
+      const loadingDisabled = await cp.getByRole("button", { name: "정리 중…" }).isDisabled();
+      release();
+      await cp.getByTestId("ai-fan-summary").waitFor();
+      const ok = await cp.getByTestId("ai-fan-summary").innerText();
+      const meta = await cp.getByText(/^마지막 정리: /).innerText();
+      await cp.getByRole("button", { name: "다시 정리하기" }).click();
+      await cp.getByRole("alert").filter({ hasText: "요약을 만들지 못했어요." }).waitFor();
+      const kept = await cp.getByTestId("ai-fan-summary").innerText();
+      await shot(cp, "07-ai-summary");
+      return [loadingDisabled && ok.includes("필름 카메라") && /마지막 정리: 10월 2일 12:20/.test(meta) && kept === ok && calls === 2, { loadingDisabled, ok, meta, kept, calls }];
+    } finally {
+      await cp.unroute("**/api/studio/fan-summary");
+    }
+  });
+  await step("차단 action: '이 팬 차단하기' · danger 색", async () => {
+    const btn = cp.getByRole("button", { name: "이 팬 차단하기" });
+    const color = await btn.evaluate((e) => getComputedStyle(e).color);
+    const danger = await cp.evaluate(() => {
+      const probe = document.createElement("span");
+      probe.style.color = "var(--color-danger)";
+      document.body.appendChild(probe);
+      const c = getComputedStyle(probe).color;
+      probe.remove();
+      return c;
+    });
+    return [color === danger && color !== "", { color, danger }];
   });
   await step("크리에이터는 여전히 ai_messages · fan_memories를 직접 읽을 수 없음 (0행)", async () => {
     const a = await C.sb.from("ai_messages").select("id");

@@ -3,8 +3,9 @@
 크리에이터가 원하는 순간에 남긴 **Moment**가 모여 **Today**가 되고, 팬은 그 하루를 따라가며
 오늘의 기록을 바탕으로 한 **Creator AI(Persona)**, 그리고 때때로 **실제 크리에이터(Human)**와 대화합니다.
 
-> 현재 단계(v0.4): 실제 가입 사용자가 Fan / Creator로 사용하는 앱. Supabase Auth · Postgres(RLS) · Storage 기반.
-> Creator AI(Persona, v0.5-2) · Fan Memory(v0.6) · Fan Manager + 크리에이터 직접 메시지(v0.7)는 열려 있다. 결제는 아직 열지 않았다 — 화면에서는 "준비 중"으로 보인다.
+> 현재 버전: **v0.9 RELEASE BASELINE** — 실제 가입 사용자가 Fan / Creator로 사용하는 앱. Supabase Auth · Postgres(RLS) · Storage 기반.
+> Creator AI Avatar(Persona · Truth) · Fan Memory · Fan Manager · 한 대화방(AI Avatar + 크리에이터 본인) · SafeShare / Safety가 열려 있다.
+> 결제는 아직 없다(v0.9.5) — 유료 플랜은 화면에서 "결제 준비 중"으로 보인다. 버전별 범위는 아래 [버전 · Roadmap](#버전--roadmap).
 
 ## 실행
 
@@ -101,6 +102,9 @@ src/
 | `DEMO_CREATOR_EMAIL` / `_PASSWORD` | 개발용 seed(`db:seed`)만 사용 |
 
 > 앱 화면 · 테스트는 데모 계정을 쓰지 않는다 (자동 로그인 없음). `NEXT_PUBLIC_`을 붙이지 않은 seed 전용 변수다.
+
+> **QA 임시 구독** (`ENABLE_QA_SUBSCRIPTION` · `QA_SUBSCRIPTION_KEY`, `.env.example` 참고)은 개발 · QA 전용이다 — 실제 `subscriptions` 등급을 결제 없이 바꾼다.
+> **Production deployment must not enable `ENABLE_QA_SUBSCRIPTION`.** 코드는 `VERCEL_ENV=production`이면 꺼지지만, Vercel 밖에 배포하면 이 가드가 없으므로 배포 환경변수를 직접 확인한다.
 
 **Supabase Dashboard 설정 (Authentication)**
 
@@ -204,7 +208,8 @@ npm run test:human-live -- --confirm-dev                      # v0.7 실제 프�
 npm run build && npm run test:human-e2e -- --confirm-dev      # v0.7 Chrome 두 브라우저: Fan Manager → 직접 메시지 실시간 → 공유 · 신고 · 차단 · 구독 종료 (LLM 없음)
 npm run test:safety-live -- --confirm-dev                     # v0.8 실제 프로젝트: Safe Delay 누출(행 · 미디어 · AI · 반응 · Fan Manager) · 운영 권한 · 계정 삭제 (LLM 없음)
 npm run build && npm run test:safety-e2e -- --confirm-dev     # v0.8 Chrome: SafeShare OCR · 가리기 · 공개 예약 · 지금 공개 · 차단 관리 · /admin 404 · 계정 삭제 (LLM 없음)
-npm run build && npm run test:avatar-e2e -- --confirm-dev    # v0.8.5 Chrome: AI Avatar ON 가드 · 기본정보 · 말투 학습 · 환영 메시지 · 열람 안내 · Fans 플랜 · AI 요약 · 통계 · 320px (LLM 없음)
+npm run build && npm run test:avatar-e2e -- --confirm-dev    # v0.8.5 Chrome: AI Avatar ON 가드 · 기본정보 · 말투 학습 · 환영 메시지 · 열람 안내 · Fans 플랜 · 팬 상세 2탭 · AI 팬 요약 UI · 통계 · 320px (LLM 없음)
+npm run test:fan-summary-live -- --confirm-dev                # v0.9 실제 프로젝트: AI 팬 요약 입력 — Fan Memory · 메모 · 안내 확인 전 · 취소 기간 대화 제외 · 권한 (LLM 없음)
 npm run build && npm run test:discover-e2e -- --confirm-dev  # v0.8.1 Chrome: 0명 빈 상태 → 크리에이터 등록 → Discover · Today · Safe Delay · 차단/해제 · 계정 삭제 (LLM 없음)
 npm run find:test-leftovers                                   # 읽기 전용: 남은 테스트 형식 계정 · seed 계정 · 주인 없는 Storage 파일 목록 (삭제하지 않음)
 npm run db:cleanup-media -- --dry-run --confirm-dev # 참조 없는 업로드 파일 찾기 (--dry-run 빼면 삭제)
@@ -306,8 +311,8 @@ AI 키는 `AI_PROVIDER=anthropic` · `AI_API_KEY` · `AI_MODEL` (서버 환경 �
 | 말투 데이터 | 고칠 수 없다 (쓰기는 함수만). 다시 답하기 = 이전 답 보관 후 새 행 · 추가 학습(`avatar_training`) · AI 답 고침(`creator_correction`, 구조만) · 전체 초기화(확인 문구 "초기화", 보관 · AI OFF) |
 | AI 대화 열람 | 팬이 크리에이터별 안내를 확인해야 AI 대화가 열린다(`ai_notice_required`). 크리에이터는 `creator_fan_ai_messages()`로 확인 **이후** 메시지만 본다. 확인 취소(My › AI Avatar 대화 열람) 시 열람 중지. `ai_messages` · `fan_memories` RLS는 그대로 |
 | 구독 환영 메시지 | 유료 구독 활성화 순간 subscriptions trigger가 한 번(팬 × 크리에이터) `subscription_welcomes`에 만든다. 팬 화면에 "Creator가 설정한 자동 환영 메시지"로 표시 (Human Chat에 넣지 않음) |
-| Fans | 플랜 탭(등급 목록 · 개수는 enum에서 — `fan_manager_tier_counts` · `fan_manager_by_tier`) · 팬 상세 정보 / 대화(✓ 직접 · 🤖 AI) / AI 요약 |
-| AI 요약 | `/api/studio/fan-summary` — 허용된 데이터만 규칙으로 정리. LLM 한 줄 요약은 `AI_FAN_SUMMARY=on`일 때만(기본 꺼짐), 추론 · 평가 문장 필터 통과 |
+| Fans | 플랜 탭(등급 목록 · 개수는 enum에서 — `fan_manager_tier_counts` · `fan_manager_by_tier`) · 팬 상세 2탭: 정보(구독 정보 · 있었던 일 · 공유 정보 · 내 메모 · AI 팬 요약 · 이 팬 차단하기) / 대화(한 타임라인 — 직접 메시지 + 안내 확인 이후 AI 대화를 화면에서만 시간순 병합, 저장소는 분리 · 입력창은 항상 본인 직접 메시지) |
+| 팬 요약 | 규칙 기반 사실("있었던 일", LLM 없음)과 AI 팬 요약을 구분. AI 팬 요약 = 버튼을 눌렀을 때만 `POST /api/studio/fan-summary` → `collectFanSummaryInput`(크리에이터 세션 · 플랜 · 반응 수 · 공유 정보 · 직접 대화 · 안내 확인 이후 AI 대화만) → LLM 1회(structured `{sentences}`) → 문장별 추론 · 평가 필터. `AI_FAN_SUMMARY=on`일 때만(기본 꺼짐) · AI rate limit 공유 · 결과는 저장하지 않음 |
 | 통계 | `creator_analytics(from, to)` — Moment · 받은 반응 · 새 관계 · AI 대화량(합계만). 조회수는 저장하지 않음(“데이터 준비 중”) |
 
 ## 디자인 시스템
@@ -333,6 +338,26 @@ AI 키는 `AI_PROVIDER=anthropic` · `AI_API_KEY` · `AI_MODEL` (서버 환경 �
 - Creator AI 진입점은 항상 Moment 콘텐츠보다 시각적으로 약하게 둔다.
 - AI와 실제 크리에이터는 라벨 · 말풍선 색 · 아바타 링 세 가지로 구분한다.
 - Creator AI는 팬이 볼 수 있고 크리에이터가 AI 참고를 허용한 오늘의 Moment만 근거로 한다.
+
+## 버전 · Roadmap
+
+| 버전 | 상태 | 범위 |
+|---|---|---|
+| v0.8 | 완료 | SafeShare · Safe Delay · Safety · Privacy 기반 |
+| v0.8.5 | 완료 | Creator AI Avatar · Persona · Truth > Style · 한 대화방 |
+| **v0.9** | **RELEASE BASELINE** | 위 전체 + Creator 팬 관리 UX (팬 상세 정보 / 대화 2탭 · 통합 타임라인 · AI 팬 요약 — `AI_FAN_SUMMARY` 기능 플래그, 저장 없음) |
+| v0.9.5 | 시작 전 | 실제 결제 · 구독 (QA 임시 구독 대체) |
+| v0.10 | 시작 전 | Creator Learning MVP (영상 기반 말투 학습) |
+| v0.11 | 시작 전 | 대용량 Creator Learning · Creator Web Studio |
+| v0.12 | 시작 전 | Creator Schedule · Live Context |
+| v1.0 | 시작 전 | Closed Beta |
+
+v0.9에서 알려진 제한 (다음 버전 이후):
+
+- Studio 팬 상세 통합 타임라인의 AI Avatar 메시지는 실시간이 아니다 (들어갈 때 불러온다). 직접 메시지는 실시간.
+- AI 팬 요약은 저장하지 않는다 (화면을 떠나면 사라진다) · 모델이 4문장을 넘기면 4문장까지만 보인다.
+- 팬 프로필(닉네임 · 사진) 편집 · 조회수 집계 · AI 답 고침(`creator_correction`) 화면은 없다.
+- 개발 · 운영 Supabase 프로젝트 분리는 v0.9.5 시작 전에 한다 (`db:seed` · QA 키는 개발 프로젝트 전용).
 
 ## Backlog (미구현)
 

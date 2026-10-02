@@ -163,7 +163,7 @@ try {
     return [!FORBIDDEN.test(text) && !text.includes(SECRET) && !text.includes("10월 20일 생일"), text.match(FORBIDDEN)?.[0]];
   });
   await shot(cp, "fans");
-  /** v0.8.5: 팬 상세는 정보 · 대화 · 요약 탭 — 직접 대화 UI는 '대화' 탭 안에 있다 (새로고침하면 정보 탭으로 돌아간다) */
+  /** v0.9: 팬 상세는 정보 · 대화 2탭 — 대화 탭은 한 타임라인(직접 + 안내 이후 AI) · 입력창은 항상 본인 직접 메시지 (새로고침하면 정보 탭으로 돌아간다) */
   const openChatTab = () => cp.getByRole("tab", { name: "대화" }).click();
   await step("팬 상세: 있었던 일 · 공유 정보 없음 · 메모 · 직접 대화 없음", async () => {
     await cp.getByRole("link", { name: `${FAN} 팬 보기` }).click();
@@ -172,7 +172,7 @@ try {
     const t = await cp.locator("main").innerText();
     // v0.8.5: 직접 대화는 '대화' 탭에 있다
     await openChatTab();
-    await cp.getByText("아직 직접 주고받은 메시지가 없어요").waitFor();
+    await cp.getByText("아직 주고받은 메시지가 없어요").waitFor();
     await cp.getByRole("tab", { name: "정보" }).click();
     return [t.includes("최근 Moment 5개 중 4개에 반응했어요.") && t.includes("구독 후 아직 직접 대화한 적이 없어요.") && t.includes("팬이 직접 공유한 정보가 없어요") && !t.includes(SECRET), t.slice(0, 500)];
   });
@@ -202,7 +202,12 @@ try {
     await cp.getByLabel("직접 메시지").fill("안녕하세요, 직접 인사드려요!");
     await cp.getByRole("button", { name: "직접 보내기" }).click();
     await cp.getByText("안녕하세요, 직접 인사드려요!").waitFor();
-    await cp.getByText(/✓ 직접 보냄/).first().waitFor();
+    await cp.getByText("· 내가 직접 보낸 메시지").first().waitFor();
+    // 받는 쪽 선택 없음 · 본인 표시 · DB에는 직접 메시지(human_messages · sender_type creator)로만 저장
+    const selectors = (await cp.getByRole("tab", { name: /AI Avatar 대화|직접 대화/ }).count()) + (await cp.getByRole("radio", { name: /AI Avatar 대화|직접 대화/ }).count());
+    const label = await cp.getByText(`${NAME} 본인`, { exact: true }).count();
+    const { data } = await admin.from("human_messages").select("sender_type, sender_id").eq("content", "안녕하세요, 직접 인사드려요!");
+    return [selectors === 0 && label >= 1 && data?.length === 1 && data[0].sender_type === "creator" && data[0].sender_id === C.uid, { selectors, label, data }];
   });
   await step("팬 화면에 새로고침 없이 도착 (Realtime) · '이름 본인' · '크리에이터가 직접 보낸 메시지' · AI 배지 없음", async () => {
     lastPage = fp;
@@ -303,7 +308,7 @@ try {
   await step("크리에이터가 팬 차단 → '차단한 팬이에요' · 입력창 없음 → 해제", async () => {
     lastPage = cp;
     await cp.reload();
-    await cp.getByRole("button", { name: "이 팬 차단" }).click();
+    await cp.getByRole("button", { name: "이 팬 차단하기" }).click();
     await cp.getByRole("dialog").getByRole("button", { name: "차단하기" }).click();
     await cp.getByText("차단한 팬이에요").waitFor();
     const composer = await cp.getByLabel("직접 메시지").count();

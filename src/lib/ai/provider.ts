@@ -31,10 +31,25 @@ export interface PersonaReplyOutput {
   refused: boolean;
 }
 
+/** 크리에이터용 AI 팬 요약 (lib/fanSummary.ts aiFanSummaryPrompt) — 답 형식 {"sentences": string[]} */
+export interface FanSummaryInput {
+  system: string;
+  user: string;
+  requestId: string;
+}
+
+export interface FanSummaryOutput {
+  /** 모델이 돌려준 원문 (JSON — fanSummary.ts parseAiFanSummaryOutput) */
+  text: string;
+  model: string;
+  refused: boolean;
+}
+
 export interface PersonaProvider {
   readonly name: AiProviderName;
   readonly model: string;
   generatePersonaReply(input: PersonaReplyInput): Promise<PersonaReplyOutput>;
+  generateFanSummary(input: FanSummaryInput): Promise<FanSummaryOutput>;
 }
 
 /** 설정된 Provider. 설정이 없거나 아직 구현하지 않은 Provider면 null */

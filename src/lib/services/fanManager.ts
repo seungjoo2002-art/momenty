@@ -145,17 +145,20 @@ export async function getFanAiConversation(fanId: string): Promise<FanAiConversa
   return data as FanAiConversation;
 }
 
-export type { FanSummary } from "@/lib/fanSummary";
+export type { AiFanSummary } from "@/lib/fanSummary";
 
-/** 팬 AI 요약 — 서버가 크리에이터 세션으로 허용된 데이터만 모아 만든다 (/api/studio/fan-summary) */
-export async function getFanSummary(fanId: string): Promise<import("@/lib/fanSummary").FanSummary> {
+/**
+ * AI 팬 요약 만들기 (크리에이터가 버튼을 눌렀을 때만 · LLM 1회) — 서버가 크리에이터 세션으로 허용된 데이터만 모은다.
+ * 저장하지 않는다. 실패해도 화면의 사실 정보(정보 탭)는 그대로다.
+ */
+export async function createAiFanSummary(fanId: string): Promise<import("@/lib/fanSummary").AiFanSummary> {
   let res: Response;
   try {
     res = await fetch("/api/studio/fan-summary", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ fanId }) });
   } catch {
     throw new ServiceError("네트워크 연결을 확인해 주세요.", "network");
   }
-  const body = (await res.json().catch(() => ({}))) as { ok?: boolean; summary?: import("@/lib/fanSummary").FanSummary; error?: { message?: string } };
+  const body = (await res.json().catch(() => ({}))) as { ok?: boolean; summary?: import("@/lib/fanSummary").AiFanSummary; error?: { message?: string } };
   if (!res.ok || !body.ok || !body.summary) throw new ServiceError(body.error?.message ?? "요약을 만들지 못했어요.", res.status === 403 ? "forbidden" : "unknown");
   return body.summary;
 }
